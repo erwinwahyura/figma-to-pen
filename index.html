@@ -298,7 +298,15 @@ function convert(data, varsData, opts = {}) {
       images.add(ref);
       f = { type: "image", url: p._url || "./images/" + ref + ".png", mode: { FILL: "cover", FIT: "contain", STRETCH: "stretch", CROP: "cover", TILE: "cover" }[p.scaleMode] || "cover" };
       if (p.scaleMode === "TILE") warn("Tiled image fills converted to cover");
-      if (p.scaleMode === "CROP") warn("Cropped image fills converted to cover without the crop");
+      const m = p.imageTransform;
+      if (p.scaleMode === "CROP" && m && m[0] && m[1]) {
+        // Figma maps the layer's unit box into the image; pen maps the image into the crop box, so invert it
+        const [[a, c, tx], [b, d, ty]] = m, det = a * d - b * c;
+        if (Math.abs(det) > 1e-9) {
+          const ia = d / det, ib = -b / det, ic = -c / det, id = a / det;
+          f.mode = "stretch"; f.transform = [ia, ib, ic, id, -(ia * tx + ic * ty), -(ib * tx + id * ty)].map(v => Math.round(v * 10000) / 10000);
+        }
+      } else if (p.scaleMode === "CROP") warn("Cropped image fills converted to cover without the crop");
       if (p.opacity != null && p.opacity < 1) f.opacity = R(p.opacity);
     } else { warn("Unsupported paint type " + p.type + " skipped"); return null; }
     if (blend && typeof f === "object") f.blendMode = blend;
@@ -412,6 +420,40 @@ function convert(data, varsData, opts = {}) {
     return s;
   }
 
+  // A mask clips the siblings above it, up to the next mask
+  function kidsOf(list, pBox, flow, reg) {
+    const out = [];
+    list = list || [];
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i];
+      if (!m.isMask || (m.visible === false && opts.skipHidden)) { const o = conv(m, pBox, flow, reg); if (o) out.push(o); continue; }
+      let j = i + 1; while (j < list.length && !list[j].isMask) j++;
+      const masked = list.slice(i + 1, j).filter(c => !(c.visible === false && opts.skipHidden)); i = j - 1;
+      const mb = m.absoluteBoundingBox || { x: 0, y: 0, width: 0, height: 0 };
+      count("masks");
+      // the usual icon recipe: a vector mask over one plain fill becomes the vector painted with that fill
+      const cover = masked.length === 1 && !(masked[0].children && masked[0].children.length) && ["RECTANGLE", "FRAME", "VECTOR", "ELLIPSE"].includes(masked[0].type) && masked[0].absoluteBoundingBox;
+      const cb = cover && masked[0].absoluteBoundingBox;
+      if (cover && cb.x <= mb.x + 0.5 && cb.y <= mb.y + 0.5 && cb.x + cb.width >= mb.x + mb.width - 0.5 && cb.y + cb.height >= mb.y + mb.height - 0.5 && (masked[0].fills || []).length) {
+        const o = conv({ ...m, isMask: false, fills: masked[0].fills, strokes: [], opacity: masked[0].opacity != null ? masked[0].opacity : m.opacity }, pBox, flow, reg);
+        if (o) out.push(o);
+        continue;
+      }
+      const w = { type: "frame", id: penId(m.id), name: m.name || "Mask", layout: "none", clip: true, width: R(mb.width), height: R(mb.height) };
+      const abs = m.layoutPositioning === "ABSOLUTE";
+      if (!flow || abs) { w.x = R(mb.x - pBox.x); w.y = R(mb.y - pBox.y); }
+      if (flow && abs) w.layoutPosition = "absolute";
+      if (m.type === "ELLIPSE") w.cornerRadius = R(Math.min(mb.width, mb.height) / 2);
+      else corners(m, w);
+      if (!["RECTANGLE", "ELLIPSE", "FRAME"].includes(m.type)) warn("Vector masks were approximated by clipping to their bounding box");
+      const kids = masked.map(c => conv(c, mb, null, reg)).filter(Boolean);
+      if (kids.length) w.children = kids;
+      if (reg) reg.set(m.id, { penId: w.id, node: w });
+      out.push(w);
+    }
+    return out;
+  }
+
   function conv(n, pBox, pAuto, reg) {
     if (n.visible === false && opts.skipHidden) { count("hidden layers skipped"); return null; }
     if (SKIP_TYPES.has(n.type)) { warn(n.type.toLowerCase().replace(/_/g, " ") + " layers aren’t supported and were skipped"); return null; }
@@ -426,7 +468,9 @@ function convert(data, varsData, opts = {}) {
     if (n.opacity != null && n.opacity < 0.999) base.opacity = bound((n.boundVariables || {}).opacity) || R(n.opacity);
     if (n._rotDeg != null) { if (Math.abs(n._rotDeg) > 0.01) base.rotation = R(n._rotDeg); }
     else if (n.rotation && Math.abs(n.rotation) > 0.01) warn("Rotated layers use their bounding box; check rotation by hand");
-    if (n._flipped) warn("Flipped (mirrored) layers were kept unflipped; check them by hand");
+    if (n.flipX) base.flipX = true;
+    if (n.flipY) base.flipY = true;
+    if (n._flipped) warn("Rotated and flipped layers were kept unflipped; check them by hand");
     let o;
     const t = n.type;
 
@@ -449,7 +493,7 @@ function convert(data, varsData, opts = {}) {
         count("components");
       } else count("frames");
       if (reg) reg.set(n.id, { penId: id, node: o });
-      const kids = (n.children || []).map(c => conv(c, box, flow, childReg)).filter(Boolean);
+      const kids = kidsOf(n.children, box, flow, childReg);
       if (kids.length) o.children = kids;
       return o;
     }
@@ -458,7 +502,7 @@ function convert(data, varsData, opts = {}) {
       o = { type: "group", ...base };
       const fx = {}; graphics({ effects: n.effects }, fx, false); if (fx.effect) o.effect = fx.effect;
       if (reg) reg.set(n.id, { penId: id, node: o });
-      const kids = (n.children || []).map(c => conv(c, box, null, reg)).filter(Boolean);
+      const kids = kidsOf(n.children, box, null, reg);
       if (kids.length) o.children = kids;
       count("groups");
       return o;
@@ -487,6 +531,19 @@ function convert(data, varsData, opts = {}) {
       graphics(n, o);
       if (reg) reg.set(n.id, { penId: id, node: o });
       count("text");
+      if (s.textTruncation === "ENDING") {
+        // pen has no text truncation, so clip the text to the box Figma truncates it to
+        const w = { type: "frame", id: penId(n.id + "-clip"), name: n.name || "Text", layout: "vertical", clip: true };
+        for (const k of ["x", "y", "layoutPosition", "enabled"]) if (o[k] !== undefined) { w[k] = o[k]; delete o[k]; }
+        w.width = o.width === "fill_container" ? "fill_container" : R(box.width);
+        w.height = o.height === "fill_container" ? "fill_container" : R(box.height);
+        if (ar === "WIDTH_AND_HEIGHT") o.textGrowth = "auto";
+        else { o.textGrowth = "fixed-width"; o.width = "fill_container"; }
+        delete o.height;
+        w.children = [o];
+        warn("Truncated text is clipped to its box, without an ellipsis");
+        return w;
+      }
       return o;
     }
     if (t === "RECTANGLE") {
@@ -515,6 +572,8 @@ function convert(data, varsData, opts = {}) {
         o.geometry = sg.map(g => g.path).join(" ");
         const f = paints(n.strokes); if (f !== undefined) o.fill = f;
         const fx = {}; graphics({ effects: n.effects }, fx, false); if (fx.effect) o.effect = fx.effect;
+      } else if (n._openPath) {
+        o.geometry = n._openPath; graphics(n, o, false);
       } else if (t === "LINE") {
         o.geometry = "M0 0 L" + w + " 0"; graphics(n, o);
       } else {
@@ -708,6 +767,45 @@ function figToRest(dec) {
     return out.join(" ");
   }
   const geom = list => (list || []).map(g => ({ path: blobPath(g.commandsBlob), windingRule: g.windingRule === "ODD" || g.windingRule === "EVENODD" ? "EVENODD" : "NONZERO" })).filter(g => g.path);
+  // Vectors saved without fillGeometry still carry their vector network; rebuild paths from it
+  function networkPaths(vd, size) {
+    const b = vd && blobs[vd.vectorNetworkBlob] && blobs[vd.vectorNetworkBlob].bytes; if (!b || b.length < 12) return null;
+    const u = Uint8Array.from(b), dv = new DataView(u.buffer); let p = 0;
+    const U = () => { const v = dv.getUint32(p, true); p += 4; return v; }, F = () => { const v = dv.getFloat32(p, true); p += 4; return v; };
+    const nv = U(), ns = U(), nr = U();
+    if (12 + nv * 12 + ns * 28 > u.length) return null;
+    const ns0 = vd.normalizedSize || size, sx = ns0.x ? size.x / ns0.x : 1, sy = ns0.y ? size.y / ns0.y : 1;
+    const V = []; for (let i = 0; i < nv; i++) { U(); V.push({ x: F() * sx, y: F() * sy }); }
+    const S = []; for (let i = 0; i < ns; i++) { U(); S.push({ a: U(), ta: { x: F() * sx, y: F() * sy }, b: U(), tb: { x: F() * sx, y: F() * sy } }); }
+    const pt = v => R(v.x) + " " + R(v.y);
+    const seg = (s, rev) => {
+      const [a, ta, b, tb] = rev ? [s.b, s.tb, s.a, s.ta] : [s.a, s.ta, s.b, s.tb];
+      const A = V[a], B = V[b];
+      if (!A || !B) return "";
+      return ta.x || ta.y || tb.x || tb.y ? "C" + pt({ x: A.x + ta.x, y: A.y + ta.y }) + " " + pt({ x: B.x + tb.x, y: B.y + tb.y }) + " " + pt(B) : "L" + pt(B);
+    };
+    const chain = (idx, close) => {
+      let out = "", cur = -1;
+      idx.forEach((k, i) => {
+        const s = S[k]; if (!s) return;
+        let rev = false;
+        if (i === 0) { const nx = S[idx[1]]; rev = !!nx && (s.a === nx.a || s.a === nx.b) && s.b !== nx.a && s.b !== nx.b; }
+        else rev = s.b === cur && s.a !== cur;
+        const from = rev ? s.b : s.a;
+        if (from !== cur) out += (out ? " " : "") + "M" + pt(V[from]);
+        out += " " + seg(s, rev); cur = rev ? s.a : s.b;
+      });
+      return out && close ? out + " Z" : out;
+    };
+    const fills = [];
+    for (let r = 0; r < nr && p + 8 <= u.length; r++) {
+      const st = U(), loops = U(), parts = [];
+      for (let l = 0; l < loops; l++) { const k = U(), idx = []; for (let q = 0; q < k; q++) idx.push(U()); parts.push(chain(idx, true)); }
+      fills.push({ path: parts.join(" "), windingRule: st & 1 ? "NONZERO" : "EVENODD" });
+    }
+    if (fills.length) return { fills };
+    return S.length ? { open: chain(S.map((_, i) => i), false) } : null;
+  }
 
   function handles(t) {
     if (!t) return null;
@@ -721,7 +819,12 @@ function figToRest(dec) {
     const o = { type: p.type, visible: p.visible, opacity: p.opacity, blendMode: p.blendMode };
     if (p.type === "SOLID") o.color = p.color;
     else if (p.type && p.type.startsWith("GRADIENT_")) { o.gradientStops = p.stops || []; o.gradientHandlePositions = handles(p.transform); }
-    else if (p.type === "IMAGE") { const h = hexBytes(p.image && p.image.hash); o.imageRef = h; o._url = "./images/" + h + extOf((dec.images || {})[h]); o.scaleMode = p.imageScaleMode || "FILL"; }
+    else if (p.type === "IMAGE") { const h = hexBytes(p.image && p.image.hash); o.imageRef = h; o._url = "./images/" + h + extOf((dec.images || {})[h]); o.scaleMode = p.imageScaleMode || "FILL";
+      const t = p.transform;
+      if (t && o.scaleMode === "STRETCH" && (Math.abs(t.m00 - 1) > 1e-4 || Math.abs(t.m11 - 1) > 1e-4 || Math.abs(t.m01) > 1e-4 || Math.abs(t.m10) > 1e-4 || Math.abs(t.m02) > 1e-4 || Math.abs(t.m12) > 1e-4)) {
+        o.scaleMode = "CROP"; o.imageTransform = [[t.m00, t.m01, t.m02], [t.m10, t.m11, t.m12]];
+      }
+    }
     return o;
   };
   const effect = e => ({ ...e, type: e.type === "FOREGROUND_BLUR" ? "LAYER_BLUR" : e.type });
@@ -777,13 +880,27 @@ function figToRest(dec) {
     if (n.stackPositioning === "ABSOLUTE") o.layoutPositioning = "ABSOLUTE";
     if (n.arcData) o.arcData = n.arcData;
     if (n.count) o.pointCount = n.count;
-    if (["VECTOR", "BOOLEAN_OPERATION", "LINE", "STAR", "REGULAR_POLYGON"].includes(type)) { o.fillGeometry = geom(n.fillGeometry); o.strokeGeometry = geom(n.strokeGeometry); }
+    if (["VECTOR", "BOOLEAN_OPERATION", "LINE", "STAR", "REGULAR_POLYGON"].includes(type)) {
+      o.fillGeometry = geom(n.fillGeometry); o.strokeGeometry = geom(n.strokeGeometry);
+      if (!o.fillGeometry.length && !o.strokeGeometry.length && type === "VECTOR") {
+        const net = networkPaths(n.vectorData, size);
+        if (net && net.fills) o.fillGeometry = net.fills;
+        else if (net && net.open) o._openPath = net.open;
+      }
+    }
+    if (n.mask) o.isMask = true;
+    if (o._flipped && o._rotDeg == null) {
+      if (t.m00 < 0) { o.flipX = true; o.absoluteBoundingBox.x -= size.x; }
+      if (t.m11 < 0) { o.flipY = true; o.absoluteBoundingBox.y -= size.y; }
+      delete o._flipped;
+    }
     if (type === "TEXT") {
       const fs = n.fontSize || 12, lh = n.lineHeight, ls = n.letterSpacing, fn = n.fontName || {};
       o.characters = (n.textData && n.textData.characters) || "";
       o.textAutoResize = n.textAutoResize || "NONE";
       const s = { fontFamily: fn.family, fontWeight: weightOf(n), fontSize: fs, italic: /italic/i.test(fn.style || ""),
         textAlignHorizontal: n.textAlignHorizontal, textAlignVertical: n.textAlignVertical, textCase: n.textCase, textDecoration: n.textDecoration };
+      if (n.textTruncation === "ENDING") { s.textTruncation = "ENDING"; if (n.maxLines) s.maxLines = n.maxLines; }
       if (lh) {
         if (lh.units === "PIXELS") { s.lineHeightUnit = "PIXELS"; s.lineHeightPx = lh.value; }
         else if (lh.units === "PERCENT") { if (lh.value === 100) s.lineHeightUnit = "INTRINSIC_%"; else { s.lineHeightUnit = "PIXELS"; s.lineHeightPx = (lh.value / 100) * fs; } }
@@ -800,23 +917,41 @@ function figToRest(dec) {
       const sym = sd.symbolID && findSymbol(sd.symbolID);
       if (sym) {
         o.componentId = gs(sym.guid);
-        o.children = synth(sym, x, y, prefix, sd.symbolOverrides || [], n.derivedSymbolData || []);
+        o.children = synth(sym, o.absoluteBoundingBox.x, o.absoluteBoundingBox.y, prefix, sd.symbolOverrides || [], n.derivedSymbolData || [], propsFor(sym, n.componentPropAssignments));
       } else o.children = [];
     } else {
-      o.children = childrenOf(n).map(c => build(c, x, y, gs(c.guid)));
+      o.children = childrenOf(n).map(c => build(c, o.absoluteBoundingBox.x, o.absoluteBoundingBox.y, gs(c.guid)));
     }
     return o;
   }
 
-  function synth(sym, px, py, prefix, overrides, derived) {
+  // Component properties: defaults live on the component (or its variant set), instances assign values
+  function propsFor(sym, assignments) {
+    const props = new Map(), set = sym.parentIndex && byId.get(gs(sym.parentIndex.guid));
+    for (const d of [...((set && set.componentPropDefs) || []), ...(sym.componentPropDefs || [])]) if (!d.isDeleted && d.initialValue) props.set(gs(d.id), d.initialValue);
+    for (const a of assignments || []) if (a.value) props.set(gs(a.defID), a.value);
+    return props;
+  }
+  function applyProps(node, props) {
+    for (const r of node.componentPropRefs || []) {
+      const v = !r.isDeleted && props.get(gs(r.defID)); if (!v) continue;
+      if (r.componentPropNodeField === "VISIBLE" && v.boolValue != null) node.visible = v.boolValue;
+      else if (r.componentPropNodeField === "TEXT_DATA" && v.textValue && v.textValue.characters != null) node.textData = { ...(node.textData || {}), characters: v.textValue.characters };
+      else if (r.componentPropNodeField === "OVERRIDDEN_SYMBOL_ID" && v.guidValue) node.symbolData = { ...(node.symbolData || {}), symbolID: v.guidValue };
+    }
+  }
+
+  function synth(sym, px, py, prefix, overrides, derived, props) {
     return childrenOf(sym).map(c => {
       const keys = [gs(c.guid)]; if (c.overrideKey) keys.push(gs(c.overrideKey));
       const mine = [], deeper = [], dMine = [], dDeeper = [];
       for (const ov of overrides) { const g = (ov.guidPath && ov.guidPath.guids) || []; if (!g.length || !keys.includes(gs(g[0]))) continue; (g.length === 1 ? mine : deeper).push({ ...ov, guidPath: { guids: g.slice(1) } }); }
       for (const dv of derived) { const g = (dv.guidPath && dv.guidPath.guids) || []; if (!g.length || !keys.includes(gs(g[0]))) continue; (g.length === 1 ? dMine : dDeeper).push({ ...dv, guidPath: { guids: g.slice(1) } }); }
       const node = { ...c };
+      applyProps(node, props);
       for (const ov of mine) for (const [k, v] of Object.entries(ov)) {
         if (k === "guidPath") continue;
+        if (k === "componentPropAssignments") { node[k] = [...(node[k] || []), ...v]; continue; }
         if (k === "overriddenSymbolID") node.symbolData = { ...(node.symbolData || {}), symbolID: v };
         else if (k === "textData") node.textData = { ...(c.textData || {}), ...v };
         else node[k] = v;
@@ -830,8 +965,7 @@ function figToRest(dec) {
       }
       const built = build({ ...node, guid: c.guid }, px, py, id);
       // children of a plain node inside a symbol must keep instance-prefixed ids and overrides
-      const t = node.transform || { m02: 0, m12: 0 };
-      built.children = synth(c, px + t.m02, py + t.m12, prefix, deeper, dDeeper);
+      built.children = synth(c, built.absoluteBoundingBox.x, built.absoluteBoundingBox.y, prefix, deeper, dDeeper, props);
       return built;
     });
   }
@@ -845,7 +979,12 @@ function figToRest(dec) {
   (function mark(list) { for (const n of list) { onPage.add(gs(n.guid)); mark(childrenOf(n)); } })(visible);
   const want = g => { const s = g && findSymbol(g); if (s && !onPage.has(gs(s.guid)) && !used.has(gs(s.guid))) { used.set(gs(s.guid), s); walk(s); } };
   function walk(n) {
-    if (n.type === "INSTANCE" && n.symbolData) { want(n.symbolData.symbolID); for (const ov of n.symbolData.symbolOverrides || []) if (ov.overriddenSymbolID) want(ov.overriddenSymbolID); }
+    if (n.type === "INSTANCE" && n.symbolData) {
+      want(n.symbolData.symbolID);
+      for (const ov of n.symbolData.symbolOverrides || []) { if (ov.overriddenSymbolID) want(ov.overriddenSymbolID); for (const a of ov.componentPropAssignments || []) if (a.value && a.value.guidValue) want(a.value.guidValue); }
+    }
+    for (const a of n.componentPropAssignments || []) if (a.value && a.value.guidValue) want(a.value.guidValue);
+    for (const d of n.componentPropDefs || []) if (d.initialValue && d.initialValue.guidValue) want(d.initialValue.guidValue);
     for (const c of childrenOf(n)) walk(c);
   }
   visible.forEach(walk);

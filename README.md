@@ -52,8 +52,10 @@ The conversion report flags each of these when it happens:
 - Dashed strokes become solid. Shadow spread is dropped.
 - Wrapping and grid auto-layout aren't supported.
 - Text with mixed styles is flattened to its base style.
-- Tiled and cropped image fills become `cover`. Diamond gradients become radial.
-- Rotation is only kept for `.fig` input. Flipped layers aren't mirrored.
+- Tiled image fills become `cover`. Diamond gradients become radial.
+- Rotation is only kept for `.fig` input. Layers that are both rotated and flipped aren't mirrored.
+- Masks clip to the mask's bounding box. A vector mask over a single fill, which is how most icons are built, keeps its exact shape.
+- Truncated text is clipped to its box, without the ellipsis.
 - FigJam and whiteboard layers (stickies, connectors, tables and so on) are skipped.
 
 ## Files
