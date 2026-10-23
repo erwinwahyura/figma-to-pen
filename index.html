@@ -401,6 +401,12 @@ function convert(data, varsData, opts = {}) {
     }
     if (n.clipsContent) o.clip = true;
     applySize(n, o, box, pAuto, !!flow);
+    // pen can't hug children that all fill it; Figma resolves this with the frame's measured size
+    const kids = (n.children || []).filter(c => !(c.visible === false && opts.skipHidden) && c.layoutPositioning !== "ABSOLUTE");
+    if (flow && kids.length) {
+      if (o.width === "fit_content" && kids.every(c => sizing(c, flow).h === "FILL")) o.width = R(box.width);
+      if (o.height === "fit_content" && kids.every(c => sizing(c, flow).v === "FILL")) o.height = R(box.height);
+    }
     corners(n, o);
     graphics(n, o);
     if (n.explicitVariableModes && opts.variables) {
@@ -538,12 +544,13 @@ function convert(data, varsData, opts = {}) {
       graphics(n, o);
       if (reg) reg.set(n.id, { penId: id, node: o });
       count("text");
-      if (s.textTruncation === "ENDING") {
+      if (s.textTruncation === "ENDING" && (h === "FILL" || ar !== "WIDTH_AND_HEIGHT")) {
         // pen has no text truncation, so clip the text to the box Figma truncates it to
         const w = { type: "frame", id: penId(n.id + "-clip"), name: n.name || "Text", layout: "vertical", clip: true };
         for (const k of ["x", "y", "layoutPosition", "enabled"]) if (o[k] !== undefined) { w[k] = o[k]; delete o[k]; }
         w.width = o.width === "fill_container" ? "fill_container" : R(box.width);
-        w.height = o.height === "fill_container" ? "fill_container" : R(box.height);
+        // the box was measured with the component's own text; maxLines sizes it for any override
+        w.height = o.height === "fill_container" ? "fill_container" : ar === "HEIGHT" && s.maxLines && s.lineHeightPx ? R(s.maxLines * s.lineHeightPx) : R(box.height);
         if (ar === "WIDTH_AND_HEIGHT") o.textGrowth = "auto";
         else { o.textGrowth = "fixed-width"; o.width = "fill_container"; }
         delete o.height;
@@ -589,17 +596,18 @@ function convert(data, varsData, opts = {}) {
         if (reg) reg.set(n.id, { penId: id, node: o });
         count("placeholders"); return o;
       }
-      o.viewBox = [0, 0, w, h];
+      const gk = n._geomScale || 1;
+      o.viewBox = [0, 0, R(w / gk), R(h / gk)];
       applySize(n, o, box, pAuto, false);
       // stroke outlines of lines sit outside their zero-height box; widen the box to the geometry so it isn't stretched
       const nums = (o.geometry.match(/-?\d*\.?\d+(?:e-?\d+)?/gi) || []).map(Number);
       if (nums.length >= 2 && (box.width < 0.5 || box.height < 0.5)) {
         const xs = nums.filter((_, i) => i % 2 === 0), ys = nums.filter((_, i) => i % 2 === 1);
-        const x0 = Math.min(0, ...xs), y0 = Math.min(0, ...ys), x1 = Math.max(w, ...xs), y1 = Math.max(h, ...ys);
+        const x0 = Math.min(0, ...xs), y0 = Math.min(0, ...ys), x1 = Math.max(w / gk, ...xs), y1 = Math.max(h / gk, ...ys);
         o.viewBox = [R(x0), R(y0), R(Math.max(x1 - x0, 0.01)), R(Math.max(y1 - y0, 0.01))];
-        if (typeof o.width === "number") o.width = o.viewBox[2];
-        if (typeof o.height === "number") o.height = o.viewBox[3];
-        if (o.x !== undefined) { o.x = R(o.x + x0); o.y = R(o.y + y0); }
+        if (typeof o.width === "number") o.width = R(o.viewBox[2] * gk);
+        if (typeof o.height === "number") o.height = R(o.viewBox[3] * gk);
+        if (o.x !== undefined) { o.x = R(o.x + x0 * gk); o.y = R(o.y + y0 * gk); }
       }
       if (t === "LINE" && !(o.height > 0.5)) o.height = 1;
       count("paths");
@@ -640,7 +648,7 @@ function convert(data, varsData, opts = {}) {
     }
     const desc = {};
     const prefix = (n.id.startsWith("I") ? n.id : "I" + n.id) + ";";
-    (function walk(list) {
+    (function walk(list, pb) {
       for (const d of list || []) {
         if (!d.id.startsWith(prefix)) { unresolved++; continue; }
         const parts = d.id.slice(prefix.length).split(";");
@@ -675,10 +683,17 @@ function convert(data, varsData, opts = {}) {
           const g = {}; graphics(d, g);
           if (!same(g.fill, target.node.fill)) ov.fill = g.fill === undefined ? [] : g.fill;
         }
+        // resized instances (icons placed smaller, stretched cards) move and scale their layers
+        const db = d.absoluteBoundingBox, tn = target.node;
+        if (db && pb && db.width >= 0.5 && db.height >= 0.5) {
+          if (typeof tn.x === "number") { const x = R(db.x - pb.x), y = R(db.y - pb.y); if (Math.abs(x - tn.x) > 0.01 || Math.abs(y - tn.y) > 0.01) { ov.x = x; ov.y = y; } }
+          if (typeof tn.width === "number" && Math.abs(R(db.width) - tn.width) > 0.01) ov.width = R(db.width);
+          if (typeof tn.height === "number" && Math.abs(R(db.height) - tn.height) > 0.01) ov.height = R(db.height);
+        }
         if (Object.keys(ov).length) desc[key] = Object.assign(desc[key] || {}, ov);
-        if (target.node.type !== "path") walk(d.children);
+        if (target.node.type !== "path") walk(d.children, db);
       }
-    })(n.children);
+    })(n.children, box);
     if (Object.keys(desc).length) { o.descendants = desc; count("overrides"); }
   }
   if (unresolved) warn("Some instance overrides couldn’t be matched to their component and were dropped (" + unresolved + " layers)");
@@ -904,7 +919,8 @@ function figToRest(dec) {
           paddingBottom: n.stackPaddingBottom ?? n.stackVerticalPadding ?? 0, paddingLeft: n.stackHorizontalPadding || 0,
           primaryAxisAlignItems: n.stackPrimaryAlignItems === "SPACE_EVENLY" || n.stackPrimaryAlignItems === "SPACE_BETWEEN" ? "SPACE_BETWEEN" : n.stackPrimaryAlignItems || "MIN",
           counterAxisAlignItems: n.stackCounterAlignItems || "MIN",
-          primaryAxisSizingMode: /^RESIZE_TO_FIT/.test(n.stackPrimarySizing || "") ? "AUTO" : "FIXED",
+          // Figma omits stackPrimarySizing when the frame hugs; FIXED is always written out
+          primaryAxisSizingMode: n.stackPrimarySizing === "FIXED" ? "FIXED" : "AUTO",
           counterAxisSizingMode: /^RESIZE_TO_FIT/.test(n.stackCounterSizing || "") ? "AUTO" : "FIXED",
           layoutWrap: n.stackWrap === "WRAP" ? "WRAP" : "NO_WRAP", strokesIncludedInLayout: !!n.bordersTakeSpace });
       }
@@ -952,6 +968,8 @@ function figToRest(dec) {
       if (sym) {
         o.componentId = gs(sym.guid);
         o.children = synth(sym, o.absoluteBoundingBox.x, o.absoluteBoundingBox.y, prefix, sd.symbolOverrides || [], n.derivedSymbolData || [], propsFor(sym, n.componentPropAssignments));
+        const k = sd.uniformScaleFactor;
+        if (k && Math.abs(k - 1) > 1e-4) scaleTree(o.children, o.absoluteBoundingBox.x, o.absoluteBoundingBox.y, k);
       } else o.children = [];
     } else {
       o.children = childrenOf(n).map(c => build(c, o.absoluteBoundingBox.x, o.absoluteBoundingBox.y, gs(c.guid)));
@@ -975,7 +993,27 @@ function figToRest(dec) {
     }
   }
 
+  // Scaled instances ("K" scale) store no scaled sizes; Figma scales the whole subtree when drawing it
+  function scaleTree(list, ox, oy, k) {
+    for (const c of list || []) {
+      const b = c.absoluteBoundingBox;
+      c.absoluteBoundingBox = { x: ox + (b.x - ox) * k, y: oy + (b.y - oy) * k, width: b.width * k, height: b.height * k };
+      c._geomScale = (c._geomScale || 1) * k;
+      if (c.strokeWeight) c.strokeWeight *= k;
+      if (c.individualStrokeWeights) for (const s of ["top", "right", "bottom", "left"]) c.individualStrokeWeights[s] *= k;
+      if (c.cornerRadius) c.cornerRadius *= k;
+      if (c.rectangleCornerRadii) c.rectangleCornerRadii = c.rectangleCornerRadii.map(r => r * k);
+      for (const f of ["itemSpacing", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft"]) if (c[f]) c[f] *= k;
+      c.effects = (c.effects || []).map(e => ({ ...e, radius: (e.radius || 0) * k, spread: (e.spread || 0) * k, offset: e.offset && { x: e.offset.x * k, y: e.offset.y * k } }));
+      if (c.style) for (const f of ["fontSize", "lineHeightPx", "letterSpacing"]) if (c.style[f]) c.style[f] *= k;
+      scaleTree(c.children, ox, oy, k);
+    }
+  }
+
   function synth(sym, px, py, prefix, overrides, derived, props) {
+    // guid paths only step through instances, so layers nested in plain frames are addressed by their own key
+    const flatOv = overrides.filter(o => o.guidPath && o.guidPath.guids && o.guidPath.guids.length === 1);
+    const flatDv = derived.filter(d => d.guidPath && d.guidPath.guids && d.guidPath.guids.length === 1);
     return childrenOf(sym).map(c => {
       const keys = [gs(c.guid)]; if (c.overrideKey) keys.push(gs(c.overrideKey));
       const mine = [], deeper = [], dMine = [], dDeeper = [];
@@ -1000,7 +1038,7 @@ function figToRest(dec) {
       }
       const built = build({ ...node, guid: c.guid }, px, py, id);
       // children of a plain node inside a symbol must keep instance-prefixed ids and overrides
-      built.children = synth(c, built.absoluteBoundingBox.x, built.absoluteBoundingBox.y, prefix, deeper, dDeeper, props);
+      built.children = synth(c, built.absoluteBoundingBox.x, built.absoluteBoundingBox.y, prefix, [...deeper, ...flatOv], [...dDeeper, ...flatDv], props);
       return built;
     });
   }
