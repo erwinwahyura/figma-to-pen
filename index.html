@@ -454,6 +454,24 @@ function convert(data, varsData, opts = {}) {
     return out;
   }
 
+  function textStyle(n) {
+    const s = n.style || {}, o = {};
+    if (s.fontFamily) o.fontFamily = s.fontFamily;
+    if (s.fontWeight) o.fontWeight = String(s.fontWeight);
+    if (s.fontSize) o.fontSize = bound((n.boundVariables || {}).fontSize) || R(s.fontSize);
+    if (s.letterSpacing) o.letterSpacing = R(s.letterSpacing);
+    if (s.lineHeightUnit !== "INTRINSIC_%" && s.lineHeightPx && s.fontSize) o.lineHeight = Math.round((s.lineHeightPx / s.fontSize) * 1000) / 1000;
+    const ta = { CENTER: "center", RIGHT: "right", JUSTIFIED: "justify" }[s.textAlignHorizontal]; if (ta) o.textAlign = ta;
+    const tv = { CENTER: "middle", BOTTOM: "bottom" }[s.textAlignVertical]; if (tv) o.textAlignVertical = tv;
+    if (s.italic) o.fontStyle = "italic";
+    if (s.textDecoration === "UNDERLINE") o.underline = true;
+    if (s.textDecoration === "STRIKETHROUGH") o.strikethrough = true;
+    if (s.hyperlink && s.hyperlink.url) o.href = s.hyperlink.url;
+    return o;
+  }
+  const TEXT_KEYS = ["fontFamily", "fontWeight", "fontSize", "letterSpacing", "lineHeight", "textAlign", "textAlignVertical", "fontStyle", "underline", "strikethrough", "href"];
+  const TEXT_DEFAULTS = { fontStyle: "normal", underline: false, strikethrough: false, textAlign: "left", textAlignVertical: "top" };
+
   function conv(n, pBox, pAuto, reg) {
     if (n.visible === false && opts.skipHidden) { count("hidden layers skipped"); return null; }
     if (SKIP_TYPES.has(n.type)) { warn(n.type.toLowerCase().replace(/_/g, " ") + " layers aren’t supported and were skipped"); return null; }
@@ -509,18 +527,7 @@ function convert(data, varsData, opts = {}) {
     }
     if (t === "TEXT") {
       const s = n.style || {};
-      o = { type: "text", ...base, content: textContent(n) };
-      if (s.fontFamily) o.fontFamily = s.fontFamily;
-      if (s.fontWeight) o.fontWeight = String(s.fontWeight);
-      if (s.fontSize) o.fontSize = bound((n.boundVariables || {}).fontSize) || R(s.fontSize);
-      if (s.letterSpacing) o.letterSpacing = R(s.letterSpacing);
-      if (s.lineHeightUnit !== "INTRINSIC_%" && s.lineHeightPx && s.fontSize) o.lineHeight = Math.round((s.lineHeightPx / s.fontSize) * 1000) / 1000;
-      const ta = { CENTER: "center", RIGHT: "right", JUSTIFIED: "justify" }[s.textAlignHorizontal]; if (ta) o.textAlign = ta;
-      const tv = { CENTER: "middle", BOTTOM: "bottom" }[s.textAlignVertical]; if (tv) o.textAlignVertical = tv;
-      if (s.italic) o.fontStyle = "italic";
-      if (s.textDecoration === "UNDERLINE") o.underline = true;
-      if (s.textDecoration === "STRIKETHROUGH") o.strikethrough = true;
-      if (s.hyperlink && s.hyperlink.url) o.href = s.hyperlink.url;
+      o = { type: "text", ...base, content: textContent(n), ...textStyle(n) };
       if (n.characterStyleOverrides && n.characterStyleOverrides.some(x => x)) warn("Mixed styles inside one text layer were flattened to the base style");
       const { h, v } = sizing(n, pAuto);
       const ar = n.textAutoResize || "NONE";
@@ -584,6 +591,16 @@ function convert(data, varsData, opts = {}) {
       }
       o.viewBox = [0, 0, w, h];
       applySize(n, o, box, pAuto, false);
+      // stroke outlines of lines sit outside their zero-height box; widen the box to the geometry so it isn't stretched
+      const nums = (o.geometry.match(/-?\d*\.?\d+(?:e-?\d+)?/gi) || []).map(Number);
+      if (nums.length >= 2 && (box.width < 0.5 || box.height < 0.5)) {
+        const xs = nums.filter((_, i) => i % 2 === 0), ys = nums.filter((_, i) => i % 2 === 1);
+        const x0 = Math.min(0, ...xs), y0 = Math.min(0, ...ys), x1 = Math.max(w, ...xs), y1 = Math.max(h, ...ys);
+        o.viewBox = [R(x0), R(y0), R(Math.max(x1 - x0, 0.01)), R(Math.max(y1 - y0, 0.01))];
+        if (typeof o.width === "number") o.width = o.viewBox[2];
+        if (typeof o.height === "number") o.height = o.viewBox[3];
+        if (o.x !== undefined) { o.x = R(o.x + x0); o.y = R(o.y + y0); }
+      }
       if (t === "LINE" && !(o.height > 0.5)) o.height = 1;
       count("paths");
       if (reg) reg.set(n.id, { penId: id, node: o });
@@ -649,7 +666,11 @@ function convert(data, varsData, opts = {}) {
         const ov = {};
         if (d.visible === false && target.node.enabled !== false) ov.enabled = false;
         if (d.visible !== false && target.node.enabled === false) ov.enabled = true;
-        if (d.type === "TEXT") { const tc = textContent(d); if (tc !== target.node.content) ov.content = tc; }
+        if (d.type === "TEXT") {
+          const tc = textContent(d); if (tc !== target.node.content) ov.content = tc;
+          const ts = textStyle(d), tn = target.node.type === "frame" && target.node.children ? target.node.children[0] : target.node;
+          for (const k of TEXT_KEYS) if (!same(ts[k], tn[k])) { if (ts[k] !== undefined) ov[k] = ts[k]; else if (k in TEXT_DEFAULTS) ov[k] = TEXT_DEFAULTS[k]; }
+        }
         if (target.node.type !== "ref") {
           const g = {}; graphics(d, g);
           if (!same(g.fill, target.node.fill)) ov.fill = g.fill === undefined ? [] : g.fill;
@@ -748,6 +769,19 @@ function figToRest(dec) {
   for (const list of kids.values()) list.sort((a, b) => (a.parentIndex.position < b.parentIndex.position ? -1 : a.parentIndex.position > b.parentIndex.position ? 1 : 0));
   const childrenOf = n => kids.get(gs(n.guid)) || [];
   const findSymbol = g => byId.get(gs(g)) || byKey.get(gs(g));
+  // Shared styles are nodes too; overrides often name a style without repeating its values
+  const styleByKey = new Map();
+  for (const n of nodes) if (n.styleType && n.key) styleByKey.set(n.key, n);
+  const styleNode = ref => ref && ((ref.assetRef && styleByKey.get(ref.assetRef.key)) || (ref.guid && byId.get(gs(ref.guid))));
+  const STYLE_FIELDS = { styleIdForFill: ["fillPaints"], styleIdForStrokeFill: ["strokePaints"], styleIdForEffect: ["effects"],
+    styleIdForText: ["fontSize", "fontName", "lineHeight", "letterSpacing", "textCase", "textDecoration"] };
+  function applyStyles(node, ov) {
+    for (const [k, fields] of Object.entries(STYLE_FIELDS)) {
+      const st = ov[k] && styleNode(ov[k]); if (!st) continue;
+      for (const f of fields) if (st[f] !== undefined && ov[f] === undefined) node[f] = st[f];
+      if (k === "styleIdForText" && ov.fontName === undefined && node.textData && node.textData.fontMetaData) node.textData = { ...node.textData, fontMetaData: undefined };
+    }
+  }
   if (nodes.some(n => /^VARIABLE/.test(n.type))) notes.push("variables");
 
   const R = v => Math.round(v * 1000) / 1000;
@@ -956,6 +990,7 @@ function figToRest(dec) {
         else if (k === "textData") node.textData = { ...(c.textData || {}), ...v };
         else node[k] = v;
       }
+      for (const ov of mine) applyStyles(node, ov);
       for (const dv of dMine) { if (dv.size) node.size = dv.size; if (dv.transform) node.transform = dv.transform; if (dv.fillGeometry) node.fillGeometry = dv.fillGeometry; if (dv.strokeGeometry) node.strokeGeometry = dv.strokeGeometry; }
       const id = prefix + gs(c.guid);
       if (node.type === "INSTANCE") {
