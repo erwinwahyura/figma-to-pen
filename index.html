@@ -1,0 +1,1010 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Figma to .pen converter</title>
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fzstd@0.1.1/umd/index.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#EEF1F5; --panel:#FFFFFF; --ink:#18202B; --graphite:#566070; --line:#D3D9E1; --code:#F6F8FA;
+  --pencil:#F2B705; --pencil-deep:#C98F00; --pencil-ink:#2E2400; --wood:#E9C79A; --lead:#3A3F47;
+  --warn-bg:#FFF6DA; --warn-ink:#6B4E00; --ok:#1F7A4D;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color-scheme:light;
+  box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#13171D; --panel:#1B2028; --ink:#E6EAF0; --graphite:#9AA4B3; --line:#2C333D; --code:#11151A;
+  --warn-bg:#2C2410; --warn-ink:#F3D27A; --ok:#5BC98F; --lead:#C9CED6; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --paper:#13171D; --panel:#1B2028; --ink:#E6EAF0; --graphite:#9AA4B3; --line:#2C333D; --code:#11151A;
+  --warn-bg:#2C2410; --warn-ink:#F3D27A; --ok:#5BC98F; --lead:#C9CED6; color-scheme:dark;}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 16px/1.55 var(--sans)}
+.wrap{max-width:1240px;margin:0 auto;padding:40px 24px 64px}
+header{display:grid;gap:8px;margin-bottom:28px;max-width:70ch}
+h1{font-size:clamp(30px,4.4vw,46px);line-height:1.08;margin:0;font-weight:600;letter-spacing:-0.02em}
+h1 .to{color:var(--graphite);font-weight:400}
+header p{margin:0;color:var(--graphite)}
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:14px 22px;margin-bottom:18px}
+.toolbar label{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink);cursor:pointer}
+select{font:inherit;font-size:14px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+input[type=checkbox]{accent-color:var(--pencil-deep);width:16px;height:16px}
+.pencil{margin-left:auto;position:relative;border:0;cursor:pointer;font:500 15px var(--sans);color:var(--pencil-ink);
+  background:var(--pencil);height:46px;padding:0 40px 0 26px;
+  clip-path:polygon(0 0,calc(100% - 34px) 0,100% 50%,calc(100% - 34px) 100%,0 100%);
+  box-shadow:inset 8px 0 0 #E7A3A3, inset 14px 0 0 #B9BEC6;}
+.pencil::after{content:"";position:absolute;right:0;top:0;bottom:0;width:34px;
+  background:linear-gradient(var(--wood),var(--wood)) left/100% 100% no-repeat;
+  clip-path:polygon(0 0,100% 50%,0 100%);}
+.pencil::before{content:"";position:absolute;right:0;top:calc(50% - 6px);width:12px;height:12px;background:#3A3F47;clip-path:polygon(0 0,100% 50%,0 100%);z-index:1}
+.pencil:hover{background:#FFC71F}
+.pencil:active{transform:translateX(2px)}
+.pencil:focus-visible,button:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid var(--pencil-deep);outline-offset:2px}
+.panes{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media (max-width:860px){.panes{grid-template-columns:1fr}.pencil{margin-left:0}}
+.pane{background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;min-width:0}
+.pane-head{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.pane-head h2{font-size:15px;font-weight:600;margin:0;margin-right:auto}
+.btn{font:500 13px var(--sans);color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer}
+.btn:hover{border-color:var(--graphite)}
+textarea{display:block;width:100%;min-height:440px;resize:vertical;border:0;margin:0;padding:14px;background:var(--code);color:var(--ink);
+  font:400 12.5px/1.55 var(--mono);border-radius:0 0 10px 10px;white-space:pre;overflow:auto;tab-size:2}
+textarea:focus{outline:none}
+details.vars{border-top:1px solid var(--line)}
+details.vars summary{padding:10px 14px;font-size:14px;cursor:pointer;color:var(--graphite)}
+details.vars textarea{min-height:180px;border-radius:0 0 10px 10px}
+.dropwrap{position:relative;flex:1;display:flex;flex-direction:column}
+.dropwrap textarea{flex:1}
+.figcard{position:absolute;inset:0;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:8px;padding:28px;background:var(--code);border-radius:0 0 10px 10px}
+.figcard[hidden]{display:none}
+.figcard strong{font-size:18px;font-weight:600;word-break:break-all}
+.figcard span{color:var(--graphite);font-size:14px;max-width:46ch}
+.drop{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;background:color-mix(in srgb,var(--paper) 86%,transparent);border:3px dashed var(--pencil-deep);margin:10px;border-radius:14px;pointer-events:none}
+.drop.on{display:flex}
+.drop p{font-size:22px;font-weight:600;margin:0;background:var(--pencil);color:var(--pencil-ink);padding:12px 22px;border-radius:8px}
+.stats{font-size:13px;color:var(--graphite)}
+.err{margin:0;padding:10px 14px;background:var(--warn-bg);color:var(--warn-ink);font-size:14px;border-bottom:1px solid var(--line)}
+.report{margin-top:22px;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:18px}
+@media (max-width:860px){.report{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+.card h3{font-size:15px;margin:0 0 10px;font-weight:600}
+.counts{display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0;list-style:none}
+.counts li{font-size:13px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;color:var(--ink)}
+.counts b{font-weight:600}
+.warnings{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:6px}
+.warnings li{font-size:14px;padding:8px 10px;background:var(--warn-bg);color:var(--warn-ink);border-radius:6px}
+.clean{color:var(--ok);font-size:14px;margin:12px 0 0}
+.howto{font-size:14px;color:var(--ink)}
+.howto p{margin:0 0 10px}
+code,pre{font-family:var(--mono);font-size:12.5px}
+pre{background:var(--code);border:1px solid var(--line);border-radius:6px;padding:10px;overflow-x:auto;margin:0 0 12px;white-space:pre}
+.muted{color:var(--graphite)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="drop" id="drop" aria-hidden="true"><p>Drop your .fig or .json file</p></div>
+<div class="wrap">
+  <header>
+    <h1>Figma <span class="to">to</span> .pen</h1>
+    <p>Drop a .fig file or Figma JSON anywhere on this page, or paste JSON, and get a pen.dev document (schema 2.21) with frames, auto-layout, components, instances and variables carried across.</p>
+  </header>
+
+  <div class="toolbar" role="group" aria-label="Conversion options">
+    <label>Pages <select id="page"><option value="all">All pages</option></select></label>
+    <label><input type="checkbox" id="skipHidden" checked> Skip hidden layers</label>
+    <label><input type="checkbox" id="components" checked> Keep components and instances</label>
+    <label><input type="checkbox" id="variables" checked> Bind variables</label>
+    <button class="pencil" id="go">Convert to .pen</button>
+  </div>
+
+  <div class="panes">
+    <section class="pane" aria-labelledby="in-h">
+      <div class="pane-head">
+        <h2 id="in-h">Figma JSON</h2>
+        <button class="btn" id="sample">Load sample</button>
+        <button class="btn" id="open">Open .fig or .json</button>
+        <input type="file" id="file" accept=".json,.fig,application/json" class="sr" tabindex="-1">
+      </div>
+      <p class="err" id="err" hidden></p>
+      <div class="dropwrap" id="dropwrap"><textarea id="input" spellcheck="false" aria-label="Figma JSON input" placeholder='Drop a .fig or .json file here, or paste the response of GET /v1/files/:key?geometry=paths, a /nodes response, or the plugin export.'></textarea><div class="figcard" id="figcard" hidden><strong id="figname"></strong><span id="figmeta"></span><button class="btn" id="figclear">Paste JSON instead</button></div></div>
+      <details class="vars">
+        <summary>Variables JSON (optional)</summary>
+        <textarea id="vars" spellcheck="false" aria-label="Figma variables JSON" placeholder="Paste the response of GET /v1/files/:key/variables/local. The plugin export already includes variables."></textarea>
+      </details>
+    </section>
+    <section class="pane" aria-labelledby="out-h">
+      <div class="pane-head">
+        <h2 id="out-h">design.pen</h2>
+        <span class="stats" id="stats" aria-live="polite"></span>
+        <button class="btn" id="copy">Copy .pen JSON</button>
+        <button class="btn" id="download">Download</button>
+      </div>
+      <textarea id="output" readonly spellcheck="false" aria-label=".pen output" placeholder="Your .pen document appears here. Save it as design.pen next to an images folder."></textarea>
+    </section>
+  </div>
+
+  <div class="report">
+    <section class="card" aria-labelledby="rep-h">
+      <h3 id="rep-h">Conversion report</h3>
+      <ul class="counts" id="counts"><li class="muted">Convert a file to see what came across.</li></ul>
+      <div id="warns"></div>
+      <div id="imgs"></div>
+    </section>
+    <section class="card howto" aria-labelledby="how-h">
+      <h3 id="how-h">Getting the JSON</h3>
+      <p>From the REST API, with a personal access token. Include <code>geometry=paths</code> so icons and vectors convert as real paths.</p>
+      <pre>curl -H "X-Figma-Token: $FIGMA_TOKEN" \
+  "https://api.figma.com/v1/files/FILE_KEY?geometry=paths" \
+  -o figma.json</pre>
+      <p>A <code>.fig</code> file (File → Save local copy in Figma) converts directly in your browser. It’s Figma’s undocumented internal format, so treat .fig import as best effort; the REST JSON or plugin export is more reliable.</p>
+      <p>Variables come from a separate endpoint (Enterprise plans), or use the companion Figma plugin, which works on any plan and exports the selection with its variables in one file.</p>
+      <pre>curl -H "X-Figma-Token: $FIGMA_TOKEN" \
+  "https://api.figma.com/v1/files/FILE_KEY/variables/local" \
+  -o variables.json</pre>
+      <p class="muted">Image fills point to <code>./images/&lt;imageRef&gt;.png</code>. Download them with <code>GET /v1/files/FILE_KEY/images</code> and place them beside the .pen file.</p>
+    </section>
+  </div>
+</div>
+<script>
+/* figma2pen core: converts Figma REST-shaped JSON into a pen.dev .pen document (schema 2.21) */
+const PEN_VERSION = "2.21";
+const R = v => Math.round(v * 100) / 100;
+const hex2 = x => Math.round(Math.max(0, Math.min(1, x)) * 255).toString(16).padStart(2, "0").toUpperCase();
+function hex(c, extraA = 1) {
+  const a = (c.a == null ? 1 : c.a) * extraA;
+  return "#" + hex2(c.r) + hex2(c.g) + hex2(c.b) + (a < 0.999 ? hex2(a) : "");
+}
+const BLEND = { MULTIPLY: "multiply", SCREEN: "screen", OVERLAY: "overlay", DARKEN: "darken", LIGHTEN: "light",
+  COLOR_DODGE: "colorDodge", COLOR_BURN: "colorBurn", HARD_LIGHT: "hardLight", SOFT_LIGHT: "softLight",
+  DIFFERENCE: "difference", EXCLUSION: "exclusion", HUE: "hue", SATURATION: "saturation", COLOR: "color",
+  LUMINOSITY: "luminosity", LINEAR_BURN: "linearBurn", LINEAR_DODGE: "linearDodge" };
+const SKIP_TYPES = new Set(["SLICE", "STICKY", "SHAPE_WITH_TEXT", "CONNECTOR", "CODE_BLOCK", "STAMP", "WIDGET",
+  "EMBED", "LINK_UNFURL", "MEDIA", "TABLE", "TABLE_CELL", "WASHI_TAPE", "HIGHLIGHT"]);
+
+function extractRoots(data) {
+  let pages = [], components = {};
+  if (Array.isArray(data)) pages = [{ name: "Selection", children: data }];
+  else if (data.document) {
+    const d = data.document;
+    pages = d.type === "CANVAS" ? [d] : (d.children || []).filter(p => p.type === "CANVAS");
+    if (!pages.length && d.children) pages = [{ name: "Page", children: d.children }];
+    components = data.components || {};
+  } else if (data.nodes) {
+    const docs = Object.values(data.nodes).filter(Boolean);
+    pages = [{ name: "Nodes", children: docs.map(n => n.document).filter(Boolean) }];
+    docs.forEach(n => Object.assign(components, n.components || {}));
+  } else if (data.type === "DOCUMENT") pages = (data.children || []).filter(p => p.type === "CANVAS");
+  else if (data.type === "CANVAS") pages = [data];
+  else if (data.type) pages = [{ name: "Selection", children: [data] }];
+  else throw new Error("This JSON doesn’t look like Figma data. Paste the response of GET /v1/files/:key, /v1/files/:key/nodes, or the plugin export.");
+  return { pages: pages.map(p => ({ name: p.name || "Page", children: p.children || [] })), components };
+}
+
+function convert(data, varsData, opts = {}) {
+  opts = Object.assign({ page: "all", skipHidden: true, components: true, variables: true }, opts);
+  const warnings = new Map(), counts = {}, images = new Set();
+  const warn = m => warnings.set(m, (warnings.get(m) || 0) + 1);
+  const count = t => (counts[t] = (counts[t] || 0) + 1);
+  const { pages: allPages } = extractRoots(data);
+  const pages = opts.page === "all" ? allPages : allPages.filter((_, i) => String(i) === String(opts.page));
+
+  /* ---------- ids ---------- */
+  const idMap = new Map(), used = new Set();
+  function penId(fid) {
+    if (idMap.has(fid)) return idMap.get(fid);
+    let b = String(fid).replace(/:/g, "-").replace(/;/g, "_").replace(/[^A-Za-z0-9_-]/g, "");
+    if (!b) b = "node";
+    let id = b, i = 2;
+    while (used.has(id)) id = b + "-" + i++;
+    used.add(id); idMap.set(fid, id);
+    return id;
+  }
+
+  /* ---------- variables ---------- */
+  const meta = varsData ? (varsData.meta || varsData) : (data.variables ? (data.variables.meta || data.variables) : null);
+  const variables = {}, themes = {}, varName = {}, modeName = {}, collAxis = {};
+  const usedKeys = new Set();
+  const penKey = s => {
+    let k = String(s).trim().replace(/\//g, ".").replace(/:/g, "-").replace(/\s+/g, "-") || "var";
+    let out = k, i = 2;
+    while (usedKeys.has(out)) out = k + "-" + i++;
+    usedKeys.add(out); return out;
+  };
+  if (opts.variables && meta && meta.variables) {
+    const cols = meta.variableCollections || {};
+    const axisKeys = new Set();
+    for (const [cid, c] of Object.entries(cols)) {
+      let modes = (c.modes || []).slice();
+      if (c.defaultModeId) modes.sort((a, b) => (a.modeId === c.defaultModeId ? -1 : b.modeId === c.defaultModeId ? 1 : 0));
+      c._modes = modes;
+      modes.forEach(m => (modeName[m.modeId] = m.name));
+      let ax = String(c.name || "mode").replace(/:/g, "-").trim() || "mode", base = ax, i = 2;
+      while (axisKeys.has(ax)) ax = base + "-" + i++;
+      axisKeys.add(ax); collAxis[cid] = ax;
+      if (modes.length > 1) themes[ax] = modes.map(m => m.name);
+    }
+    const list = Object.entries(meta.variables).filter(([, v]) => !v.remote || true);
+    list.forEach(([id, v]) => (varName[id] = penKey(v.name)));
+    const TYPE = { COLOR: "color", FLOAT: "number", STRING: "string", BOOLEAN: "boolean" };
+    for (const [id, v] of list) {
+      const type = TYPE[v.resolvedType];
+      if (!type) { warn("Unsupported variable type skipped"); continue; }
+      const val = raw => {
+        if (raw && typeof raw === "object" && raw.type === "VARIABLE_ALIAS")
+          return varName[raw.id] ? "$" + varName[raw.id] : (warn("Variable alias to an unknown variable resolved to empty"), type === "color" ? "#000000" : type === "number" ? 0 : type === "boolean" ? false : "");
+        if (type === "color") return hex(raw);
+        if (type === "number") return R(raw);
+        return raw;
+      };
+      const col = cols[v.variableCollectionId];
+      const modes = col && col._modes ? col._modes : Object.keys(v.valuesByMode || {}).map(m => ({ modeId: m }));
+      let value;
+      if (modes.length > 1) value = modes.filter(m => v.valuesByMode && m.modeId in v.valuesByMode)
+        .map(m => ({ value: val(v.valuesByMode[m.modeId]), theme: { [collAxis[v.variableCollectionId]]: m.name } }));
+      else value = val(Object.values(v.valuesByMode || {})[0]);
+      variables[varName[id]] = { type, value };
+      count("variables");
+    }
+  }
+  const bound = alias => {
+    if (!opts.variables || !alias) return null;
+    const a = Array.isArray(alias) ? alias[0] : alias;
+    return a && varName[a.id] ? "$" + varName[a.id] : null;
+  };
+
+  /* ---------- paints ---------- */
+  function gradient(p) {
+    let h = p.gradientHandlePositions;
+    if (!h || h.length < 2) { warn("Gradient without handle positions uses a default direction"); h = [{ x: 0.5, y: 0 }, { x: 0.5, y: 1 }, { x: 0, y: 0 }]; }
+    const map = { GRADIENT_LINEAR: "linear", GRADIENT_RADIAL: "radial", GRADIENT_ANGULAR: "angular", GRADIENT_DIAMOND: "radial" };
+    if (p.type === "GRADIENT_DIAMOND") warn("Diamond gradients converted to radial");
+    const g = { type: "gradient", gradientType: map[p.type], colors: (p.gradientStops || []).map(s => ({ color: hex(s.color), position: R(s.position) })) };
+    if (p.opacity != null && p.opacity < 1) g.opacity = R(p.opacity);
+    const [a, b, c] = h;
+    if (g.gradientType === "linear") {
+      const dx = b.x - a.x, dy = b.y - a.y;
+      g.center = { x: R((a.x + b.x) / 2), y: R((a.y + b.y) / 2) };
+      g.size = { height: R(Math.hypot(dx, dy)) };
+      g.rotation = R(((Math.atan2(-dx, -dy) * 180) / Math.PI + 360) % 360);
+    } else {
+      const cc = c || b;
+      g.center = { x: R(a.x), y: R(a.y) };
+      g.size = { width: R(2 * Math.hypot(b.x - a.x, b.y - a.y)), height: R(2 * Math.hypot(cc.x - a.x, cc.y - a.y)) };
+    }
+    count("gradients");
+    return g;
+  }
+  function paint(p) {
+    if (!p || p.visible === false) return null;
+    const blend = BLEND[p.blendMode];
+    let f;
+    if (p.type === "SOLID") {
+      const b = bound(p.boundVariables && p.boundVariables.color);
+      const color = b && (p.opacity == null || p.opacity >= 0.999) ? b : hex(p.color, p.opacity == null ? 1 : p.opacity);
+      f = blend ? { type: "color", color } : color;
+    } else if (p.type && p.type.startsWith("GRADIENT_")) f = gradient(p);
+    else if (p.type === "IMAGE") {
+      const ref = p.imageRef || p.imageHash || "image";
+      images.add(ref);
+      f = { type: "image", url: p._url || "./images/" + ref + ".png", mode: { FILL: "cover", FIT: "contain", STRETCH: "stretch", CROP: "cover", TILE: "cover" }[p.scaleMode] || "cover" };
+      if (p.scaleMode === "TILE") warn("Tiled image fills converted to cover");
+      if (p.scaleMode === "CROP") warn("Cropped image fills converted to cover without the crop");
+      if (p.opacity != null && p.opacity < 1) f.opacity = R(p.opacity);
+    } else { warn("Unsupported paint type " + p.type + " skipped"); return null; }
+    if (blend && typeof f === "object") f.blendMode = blend;
+    return f;
+  }
+  const paints = arr => {
+    const out = (arr || []).map(paint).filter(f => f != null);
+    return out.length === 0 ? undefined : out.length === 1 ? out[0] : out;
+  };
+
+  /* ---------- graphics ---------- */
+  function graphics(n, o, withFill = true) {
+    if (withFill) { const f = paints(n.fills); if (f !== undefined) o.fill = f; }
+    const s = paints(n.strokes);
+    if (s !== undefined && (n.strokeWeight || n.individualStrokeWeights)) {
+      o.stroke = s;
+      const w = n.individualStrokeWeights;
+      o.strokeWidth = w ? { top: R(w.top), right: R(w.right), bottom: R(w.bottom), left: R(w.left) } : bound(n.boundVariables && n.boundVariables.strokeWeight) || R(n.strokeWeight);
+      const al = { INSIDE: "inner", CENTER: "center", OUTSIDE: "outer" }[n.strokeAlign];
+      if (al) o.strokeAlignment = al;
+      const cap = { ROUND: "round", SQUARE: "square", NONE: "butt" }[n.strokeCap];
+      if (cap && cap !== "butt") o.strokeLinecap = cap;
+      const join = { ROUND: "round", BEVEL: "bevel", MITER: "miter" }[n.strokeJoin];
+      if (join && join !== "miter") o.strokeLinejoin = join;
+      if (n.strokeDashes && n.strokeDashes.length) warn("Dashed strokes converted to solid strokes");
+    }
+    const fx = (n.effects || []).map(e => {
+      const en = e.visible === false ? { enabled: false } : {};
+      if (e.type === "DROP_SHADOW" || e.type === "INNER_SHADOW") {
+        if (e.spread) warn("Shadow spread isn’t supported and was dropped");
+        return { type: "shadow", ...en, shadowType: e.type === "INNER_SHADOW" ? "inner" : "outer",
+          offset: { x: R((e.offset || {}).x || 0), y: R((e.offset || {}).y || 0) }, blur: R(e.radius || 0), color: hex(e.color || { r: 0, g: 0, b: 0, a: 0.25 }) };
+      }
+      if (e.type === "LAYER_BLUR") return { type: "blur", ...en, radius: R(e.radius || 0) };
+      if (e.type === "BACKGROUND_BLUR") return { type: "background_blur", ...en, radius: R(e.radius || 0) };
+      warn("Unsupported effect " + e.type + " skipped"); return null;
+    }).filter(Boolean);
+    if (fx.length) o.effect = fx.length === 1 ? fx[0] : fx;
+  }
+  function corners(n, o) {
+    const bv = n.boundVariables || {};
+    const b = ["topLeftRadius", "topRightRadius", "bottomRightRadius", "bottomLeftRadius"].map(k => bound(bv[k]));
+    if (b[0] && b.every(x => x === b[0])) { o.cornerRadius = b[0]; return; }
+    const r = n.rectangleCornerRadii;
+    if (r && !r.every(x => x === r[0])) o.cornerRadius = r.map(R);
+    else if (n.cornerRadius) o.cornerRadius = R(n.cornerRadius);
+    else if (r && r[0]) o.cornerRadius = R(r[0]);
+  }
+
+  /* ---------- sizing ---------- */
+  function sizing(n, pAuto) {
+    let h = n.layoutSizingHorizontal, v = n.layoutSizingVertical;
+    const own = n.layoutMode && n.layoutMode !== "NONE" ? n.layoutMode : null;
+    if (!h) {
+      h = "FIXED"; v = "FIXED";
+      if (pAuto === "HORIZONTAL") { if (n.layoutGrow === 1) h = "FILL"; if (n.layoutAlign === "STRETCH") v = "FILL"; }
+      if (pAuto === "VERTICAL") { if (n.layoutGrow === 1) v = "FILL"; if (n.layoutAlign === "STRETCH") h = "FILL"; }
+      if (own === "HORIZONTAL") { if (n.primaryAxisSizingMode === "AUTO" && h === "FIXED") h = "HUG"; if (n.counterAxisSizingMode === "AUTO" && v === "FIXED") v = "HUG"; }
+      if (own === "VERTICAL") { if (n.primaryAxisSizingMode === "AUTO" && v === "FIXED") v = "HUG"; if (n.counterAxisSizingMode === "AUTO" && h === "FIXED") h = "HUG"; }
+    }
+    if (!pAuto || n.layoutPositioning === "ABSOLUTE") { if (h === "FILL") h = "FIXED"; if (v === "FILL") v = "FIXED"; }
+    return { h, v, own };
+  }
+  function applySize(n, o, box, pAuto, hugOk) {
+    const { h, v } = sizing(n, pAuto);
+    const one = (mode, px) => mode === "FILL" ? "fill_container" : mode === "HUG" && hugOk ? "fit_content" : R(px);
+    o.width = one(h, box.width); o.height = one(v, box.height);
+  }
+
+  /* ---------- node conversion ---------- */
+  const compReg = {}, pending = [];
+  const compIds = new Set();
+  (function scan(list) { for (const n of list) { if (n.visible === false && opts.skipHidden) continue; if (n.type === "COMPONENT") compIds.add(n.id); if (n.type !== "INSTANCE" && n.children) scan(n.children); } })(pages.flatMap(p => p.children));
+
+  function frameShell(n, base, box, pAuto) {
+    const o = { type: "frame", ...base };
+    const auto = n.layoutMode && n.layoutMode !== "NONE" ? n.layoutMode : null;
+    if (n.layoutMode === "GRID") warn("Grid auto-layout converted to absolute positioning");
+    const flow = auto === "HORIZONTAL" || auto === "VERTICAL" ? auto : null;
+    o.layout = flow ? flow.toLowerCase() : "none";
+    if (flow) {
+      const bv = n.boundVariables || {};
+      if (n.primaryAxisAlignItems === "SPACE_BETWEEN") o.justifyContent = "space_between";
+      else if (n.itemSpacing) o.gap = bound(bv.itemSpacing) || R(n.itemSpacing);
+      const pad = ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"].map(k => bound(bv[k]) || R(n[k] || 0));
+      if (pad.some(p => p !== 0)) o.padding = pad.every(p => p === pad[0]) ? pad[0] : pad[0] === pad[2] && pad[1] === pad[3] ? [pad[0], pad[1]] : pad;
+      const J = { CENTER: "center", MAX: "end" }[n.primaryAxisAlignItems]; if (J) o.justifyContent = J;
+      const A = { CENTER: "center", MAX: "end" }[n.counterAxisAlignItems]; if (A) o.alignItems = A;
+      if (n.counterAxisAlignItems === "BASELINE") warn("Baseline alignment converted to start");
+      if (n.layoutWrap === "WRAP") warn("Wrapping auto-layout isn’t supported; items stay on one line");
+      if (n.strokesIncludedInLayout) o.layoutIncludeStroke = true;
+    }
+    if (n.clipsContent) o.clip = true;
+    applySize(n, o, box, pAuto, !!flow);
+    corners(n, o);
+    graphics(n, o);
+    if (n.explicitVariableModes && opts.variables) {
+      const th = {};
+      for (const [cid, mid] of Object.entries(n.explicitVariableModes)) if (collAxis[cid] && modeName[mid] && themes[collAxis[cid]]) th[collAxis[cid]] = modeName[mid];
+      if (Object.keys(th).length) o.theme = th;
+    }
+    return { o, flow };
+  }
+
+  function textContent(n) {
+    let s = n.characters || "";
+    const tc = (n.style || {}).textCase;
+    if (tc === "UPPER") s = s.toUpperCase(); else if (tc === "LOWER") s = s.toLowerCase();
+    else if (tc === "TITLE") s = s.replace(/\b\w/g, c => c.toUpperCase());
+    else if (tc && tc !== "ORIGINAL") warn("Small-caps text case dropped");
+    return s;
+  }
+
+  function conv(n, pBox, pAuto, reg) {
+    if (n.visible === false && opts.skipHidden) { count("hidden layers skipped"); return null; }
+    if (SKIP_TYPES.has(n.type)) { warn(n.type.toLowerCase().replace(/_/g, " ") + " layers aren’t supported and were skipped"); return null; }
+    const box = n.absoluteBoundingBox || { x: 0, y: 0, width: (n.size || {}).x || 0, height: (n.size || {}).y || 0 };
+    const id = penId(n.id);
+    const base = { id };
+    if (n.name) base.name = n.name;
+    const absItem = n.layoutPositioning === "ABSOLUTE";
+    if (!pAuto || absItem) { base.x = R(box.x - pBox.x); base.y = R(box.y - pBox.y); }
+    if (pAuto && absItem) base.layoutPosition = "absolute";
+    if (n.visible === false) base.enabled = false;
+    if (n.opacity != null && n.opacity < 0.999) base.opacity = bound((n.boundVariables || {}).opacity) || R(n.opacity);
+    if (n._rotDeg != null) { if (Math.abs(n._rotDeg) > 0.01) base.rotation = R(n._rotDeg); }
+    else if (n.rotation && Math.abs(n.rotation) > 0.01) warn("Rotated layers use their bounding box; check rotation by hand");
+    if (n._flipped) warn("Flipped (mirrored) layers were kept unflipped; check them by hand");
+    let o;
+    const t = n.type;
+
+    if (t === "INSTANCE" && opts.components && compIds.has(n.componentId)) {
+      o = { type: "ref", ...base, ref: "" };
+      pending.push({ n, o, base, box, pAuto });
+      if (reg) reg.set(n.id, { penId: id, node: o, componentId: n.componentId });
+      count("instances");
+      return o;
+    }
+    if (t === "INSTANCE") warn("Instances of components outside the converted pages were expanded into frames");
+
+    if (t === "FRAME" || t === "COMPONENT" || t === "COMPONENT_SET" || t === "INSTANCE" || t === "SECTION") {
+      const { o: f, flow } = frameShell(n, base, box, pAuto);
+      o = f;
+      let childReg = reg;
+      if (t === "COMPONENT" && opts.components) {
+        o.reusable = true; childReg = new Map();
+        compReg[n.id] = { penId: id, reg: childReg, root: o };
+        count("components");
+      } else count("frames");
+      if (reg) reg.set(n.id, { penId: id, node: o });
+      const kids = (n.children || []).map(c => conv(c, box, flow, childReg)).filter(Boolean);
+      if (kids.length) o.children = kids;
+      return o;
+    }
+    if (t === "GROUP" || (t === "BOOLEAN_OPERATION" && !(n.fillGeometry && n.fillGeometry.length) && n.children)) {
+      if (t === "BOOLEAN_OPERATION") warn("Boolean operations without geometry kept as plain groups (export with ?geometry=paths)");
+      o = { type: "group", ...base };
+      const fx = {}; graphics({ effects: n.effects }, fx, false); if (fx.effect) o.effect = fx.effect;
+      if (reg) reg.set(n.id, { penId: id, node: o });
+      const kids = (n.children || []).map(c => conv(c, box, null, reg)).filter(Boolean);
+      if (kids.length) o.children = kids;
+      count("groups");
+      return o;
+    }
+    if (t === "TEXT") {
+      const s = n.style || {};
+      o = { type: "text", ...base, content: textContent(n) };
+      if (s.fontFamily) o.fontFamily = s.fontFamily;
+      if (s.fontWeight) o.fontWeight = String(s.fontWeight);
+      if (s.fontSize) o.fontSize = bound((n.boundVariables || {}).fontSize) || R(s.fontSize);
+      if (s.letterSpacing) o.letterSpacing = R(s.letterSpacing);
+      if (s.lineHeightUnit !== "INTRINSIC_%" && s.lineHeightPx && s.fontSize) o.lineHeight = Math.round((s.lineHeightPx / s.fontSize) * 1000) / 1000;
+      const ta = { CENTER: "center", RIGHT: "right", JUSTIFIED: "justify" }[s.textAlignHorizontal]; if (ta) o.textAlign = ta;
+      const tv = { CENTER: "middle", BOTTOM: "bottom" }[s.textAlignVertical]; if (tv) o.textAlignVertical = tv;
+      if (s.italic) o.fontStyle = "italic";
+      if (s.textDecoration === "UNDERLINE") o.underline = true;
+      if (s.textDecoration === "STRIKETHROUGH") o.strikethrough = true;
+      if (s.hyperlink && s.hyperlink.url) o.href = s.hyperlink.url;
+      if (n.characterStyleOverrides && n.characterStyleOverrides.some(x => x)) warn("Mixed styles inside one text layer were flattened to the base style");
+      const { h, v } = sizing(n, pAuto);
+      const ar = n.textAutoResize || "NONE";
+      if (h === "FILL") { o.textGrowth = v === "FILL" ? "fixed-width-height" : "fixed-width"; o.width = "fill_container"; if (v === "FILL") o.height = "fill_container"; else if (ar === "NONE" || ar === "TRUNCATE") { o.textGrowth = "fixed-width-height"; o.height = R(box.height); } }
+      else if (ar === "WIDTH_AND_HEIGHT") o.textGrowth = "auto";
+      else if (ar === "HEIGHT") { o.textGrowth = "fixed-width"; o.width = R(box.width); }
+      else { o.textGrowth = "fixed-width-height"; o.width = R(box.width); o.height = v === "FILL" ? "fill_container" : R(box.height); }
+      graphics(n, o);
+      if (reg) reg.set(n.id, { penId: id, node: o });
+      count("text");
+      return o;
+    }
+    if (t === "RECTANGLE") {
+      o = { type: "rectangle", ...base }; applySize(n, o, box, pAuto, false); corners(n, o); graphics(n, o);
+    } else if (t === "ELLIPSE") {
+      o = { type: "ellipse", ...base }; applySize(n, o, box, pAuto, false); graphics(n, o);
+      const a = n.arcData;
+      if (a) {
+        const deg = r => (r * 180) / Math.PI;
+        const sweep = deg(a.endingAngle - a.startingAngle);
+        if (Math.abs(Math.abs(sweep) - 360) > 0.01) { o.startAngle = R(-deg(a.startingAngle)); o.sweepAngle = R(-sweep); }
+        if (a.innerRadius) o.innerRadius = R(a.innerRadius);
+      }
+    } else if (t === "REGULAR_POLYGON" && !(n.fillGeometry && n.fillGeometry.length)) {
+      o = { type: "polygon", ...base, polygonCount: n.pointCount || 3 }; applySize(n, o, box, pAuto, false); graphics(n, o);
+      if (n.cornerRadius) o.cornerRadius = R(n.cornerRadius);
+    } else if (["VECTOR", "BOOLEAN_OPERATION", "LINE", "STAR", "REGULAR_POLYGON"].includes(t)) {
+      const fg = (n.fillGeometry || []).filter(g => g.path), sg = (n.strokeGeometry || []).filter(g => g.path);
+      const w = R(Math.max(box.width, 0.01)), h = R(Math.max(box.height, 0.01));
+      o = { type: "path", ...base };
+      if (fg.length) {
+        o.geometry = fg.map(g => g.path).join(" ");
+        if (fg[0].windingRule === "EVENODD") o.fillRule = "evenodd";
+        graphics(n, o);
+      } else if (sg.length) {
+        o.geometry = sg.map(g => g.path).join(" ");
+        const f = paints(n.strokes); if (f !== undefined) o.fill = f;
+        const fx = {}; graphics({ effects: n.effects }, fx, false); if (fx.effect) o.effect = fx.effect;
+      } else if (t === "LINE") {
+        o.geometry = "M0 0 L" + w + " 0"; graphics(n, o);
+      } else {
+        warn("Vector layers without geometry became rectangles (request the file with ?geometry=paths)");
+        o = { type: "rectangle", ...base }; applySize(n, o, box, pAuto, false); graphics(n, o);
+        if (reg) reg.set(n.id, { penId: id, node: o });
+        count("placeholders"); return o;
+      }
+      o.viewBox = [0, 0, w, h];
+      applySize(n, o, box, pAuto, false);
+      if (t === "LINE" && !(o.height > 0.5)) o.height = 1;
+      count("paths");
+      if (reg) reg.set(n.id, { penId: id, node: o });
+      return o;
+    } else {
+      warn("Unknown layer type " + t + " skipped");
+      return null;
+    }
+    count(t.toLowerCase().replace(/_/g, " "));
+    if (reg) reg.set(n.id, { penId: id, node: o });
+    return o;
+  }
+
+  /* ---------- pages ---------- */
+  const children = [];
+  let cursorY = 0;
+  pages.forEach((p, pi) => {
+    const boxes = p.children.map(c => c.absoluteBoundingBox).filter(Boolean);
+    const minY = boxes.length ? Math.min(...boxes.map(b => b.y)) : 0;
+    const maxY = boxes.length ? Math.max(...boxes.map(b => b.y + b.height)) : 0;
+    const origin = pages.length > 1 ? { x: 0, y: minY - cursorY } : { x: 0, y: 0 };
+    p.children.forEach(c => { const o = conv(c, origin, null, null); if (o) children.push(o); });
+    cursorY += maxY - minY + 400;
+  });
+
+  /* ---------- instances: refs + overrides ---------- */
+  const SHELL_KEYS = ["fill", "stroke", "strokeWidth", "effect", "cornerRadius", "layout", "gap", "padding", "justifyContent", "alignItems", "clip", "width", "height", "theme"];
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  let unresolved = 0;
+  for (const { n, o, base, box, pAuto } of pending) {
+    const comp = compReg[n.componentId];
+    o.ref = comp.penId;
+    const { o: shell } = frameShell(n, { id: "_" }, box, pAuto);
+    for (const k of SHELL_KEYS) if (!same(shell[k], comp.root[k]) && !(shell[k] === undefined && comp.root[k] === undefined)) {
+      if (shell[k] === undefined) { if (k === "fill" || k === "stroke" || k === "effect") o[k] = []; }
+      else o[k] = shell[k];
+    }
+    const desc = {};
+    const prefix = (n.id.startsWith("I") ? n.id : "I" + n.id) + ";";
+    (function walk(list) {
+      for (const d of list || []) {
+        if (!d.id.startsWith(prefix)) { unresolved++; continue; }
+        const parts = d.id.slice(prefix.length).split(";");
+        let c = comp, path = [], target = null, last = null;
+        for (let i = 0; i < parts.length; i++) {
+          const e = c && c.reg.get(parts[i]);
+          if (!e) { target = null; break; }
+          last = e;
+          path.push(e.penId);
+          if (i < parts.length - 1) { c = e.componentId ? compReg[e.componentId] : c; } else target = e;
+        }
+        if (!target) {
+          const insidePath = last && last.node.type === "path";
+          if (!insidePath && d.visible !== false) unresolved++;
+          continue;
+        }
+        const key = path.join("/");
+        if (target.componentId && d.type === "INSTANCE" && d.componentId !== target.componentId) {
+          if (compReg[d.componentId]) { desc[key] = { id: penId(d.id), type: "ref", ref: compReg[d.componentId].penId }; count("instance swaps"); }
+          else warn("Swapped instances pointing to external components were left unswapped");
+          continue;
+        }
+        const ov = {};
+        if (d.visible === false && target.node.enabled !== false) ov.enabled = false;
+        if (d.visible !== false && target.node.enabled === false) ov.enabled = true;
+        if (d.type === "TEXT") { const tc = textContent(d); if (tc !== target.node.content) ov.content = tc; }
+        if (target.node.type !== "ref") {
+          const g = {}; graphics(d, g);
+          if (!same(g.fill, target.node.fill)) ov.fill = g.fill === undefined ? [] : g.fill;
+        }
+        if (Object.keys(ov).length) desc[key] = Object.assign(desc[key] || {}, ov);
+        if (target.node.type !== "path") walk(d.children);
+      }
+    })(n.children);
+    if (Object.keys(desc).length) { o.descendants = desc; count("overrides"); }
+  }
+  if (unresolved) warn("Some instance overrides couldn’t be matched to their component and were dropped (" + unresolved + " layers)");
+
+  const doc = { version: PEN_VERSION };
+  if (Object.keys(themes).length) doc.themes = themes;
+  if (Object.keys(variables).length) doc.variables = variables;
+  doc.children = children;
+
+  /* ---------- light validation ---------- */
+  const seen = new Set(); let total = 0;
+  (function check(list) { for (const c of list) { total++; if (seen.has(c.id)) warn("Duplicate id " + c.id); if (c.id.includes("/")) warn("Id contains a slash: " + c.id); seen.add(c.id); if (c.children) check(c.children); } })(children);
+
+  return { doc, report: { total, counts, warnings: [...warnings.entries()], images: [...images], pages: allPages.map(p => p.name) } };
+}
+/* .fig decoder: unzips, inflates (deflate-raw or zstd) and decodes Figma's kiwi-encoded canvas */
+function figDecode(buf) {
+  let u8 = new Uint8Array(buf), images = {};
+  if (u8[0] === 0x50 && u8[1] === 0x4b) {
+    const files = fflate.unzipSync(u8);
+    if (!files["canvas.fig"]) throw new Error("This .fig archive has no canvas.fig inside it.");
+    u8 = files["canvas.fig"];
+    for (const k of Object.keys(files)) if (k.startsWith("images/")) images[k.slice(7)] = files[k];
+  }
+  const head = new TextDecoder().decode(u8.subarray(0, 8));
+  if (head !== "fig-kiwi" && !head.startsWith("fig-")) throw new Error("This file isn’t a Figma design file (missing fig-kiwi header).");
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const version = dv.getUint32(8, true);
+  let off = 12; const chunks = [];
+  while (off + 4 <= u8.length) { const n = dv.getUint32(off, true); off += 4; chunks.push(u8.subarray(off, off + n)); off += n; }
+  const unpack = c => (c[0] === 0x28 && c[1] === 0xb5 && c[2] === 0x2f && c[3] === 0xfd) ? fzstd.decompress(c) : fflate.inflateSync(c);
+  const schemaBytes = unpack(chunks[0]), dataBytes = unpack(chunks[1]);
+
+  function Reader(b) {
+    let i = 0; const f32 = new Float32Array(1), u32 = new Uint32Array(f32.buffer), td = new TextDecoder();
+    return {
+      byte: () => b[i++],
+      bool: () => b[i++] > 0,
+      uint() { let v = 0, s = 0, c; do { c = b[i++]; v += (c & 127) * Math.pow(2, s); s += 7; } while (c & 128 && s < 35); return v; },
+      int() { const v = this.uint(); return v % 2 ? -(v + 1) / 2 : v / 2; },
+      uint64() { let v = 0n, s = 0n, c; do { c = b[i++]; v |= BigInt(c & 127) << s; s += 7n; } while (c & 128 && s < 70n); return Number(v); },
+      int64() { const v = this.uint64(); return v % 2 ? -(v + 1) / 2 : v / 2; },
+      float() { const c = b[i++]; if (c === 0) return 0; let bits = (c | (b[i++] << 8) | (b[i++] << 16) | (b[i++] << 24)) >>> 0; bits = ((bits << 23) | (bits >>> 9)) >>> 0; u32[0] = bits; return f32[0]; },
+      string() { const s = i; while (b[i] !== 0) i++; const out = td.decode(b.subarray(s, i)); i++; return out; },
+      bytes(n) { const out = b.subarray(i, i + n); i += n; return out; }
+    };
+  }
+  const sr = Reader(schemaBytes), types = [];
+  const defCount = sr.uint();
+  for (let d = 0; d < defCount; d++) {
+    const name = sr.string(), kind = sr.byte(), fc = sr.uint(), fields = {}, order = [];
+    for (let k = 0; k < fc; k++) { const f = { name: sr.string(), type: sr.int(), array: sr.bool(), value: sr.uint() }; fields[f.value] = f; order.push(f); }
+    types.push({ name, kind, fields, order });
+  }
+  const PRIM = ["bool", "byte", "int", "uint", "float", "string", "int64", "uint64"];
+  const r = Reader(dataBytes);
+  function decodeType(t, array) {
+    if (array) {
+      const n = r.uint();
+      if (t === -2) return Array.from(r.bytes(n));
+      const a = new Array(n); for (let k = 0; k < n; k++) a[k] = decodeType(t, false); return a;
+    }
+    if (t < 0) return r[PRIM[~t]]();
+    const T = types[t];
+    if (T.kind === 0) { const v = r.uint(); return T.fields[v] ? T.fields[v].name : v; }
+    if (T.kind === 1) { const o = {}; for (const f of T.order) o[f.name] = decodeType(f.type, f.array); return o; }
+    const o = {};
+    for (;;) { const id = r.uint(); if (id === 0) break; const f = T.fields[id]; if (!f) throw new Error("Unknown field " + id + " in " + T.name + " (newer .fig format)"); o[f.name] = decodeType(f.type, f.array); }
+    return o;
+  }
+  const root = types.findIndex(t => t.name === "Message");
+  if (root < 0) throw new Error("This .fig file uses an unrecognized schema.");
+  const message = decodeType(root, false);
+  return { version, message, images };
+}
+/* Maps decoded .fig nodeChanges onto the Figma REST JSON shape the converter reads */
+function figToRest(dec) {
+  const nodes = (dec.message.nodeChanges || []).filter(n => n.phase !== "REMOVED");
+  const blobs = dec.message.blobs || [];
+  const gs = g => g ? g.sessionID + ":" + g.localID : "";
+  const byId = new Map(), byKey = new Map(), kids = new Map();
+  const notes = [];
+  for (const n of nodes) {
+    byId.set(gs(n.guid), n);
+    if (n.overrideKey && n.overrideKey.sessionID !== 4294967295) byKey.set(gs(n.overrideKey), n);
+    if (n.parentIndex) { const p = gs(n.parentIndex.guid); if (!kids.has(p)) kids.set(p, []); kids.get(p).push(n); }
+  }
+  for (const list of kids.values()) list.sort((a, b) => (a.parentIndex.position < b.parentIndex.position ? -1 : a.parentIndex.position > b.parentIndex.position ? 1 : 0));
+  const childrenOf = n => kids.get(gs(n.guid)) || [];
+  const findSymbol = g => byId.get(gs(g)) || byKey.get(gs(g));
+  if (nodes.some(n => /^VARIABLE/.test(n.type))) notes.push("variables");
+
+  const R = v => Math.round(v * 1000) / 1000;
+  function blobPath(i) {
+    const b = blobs[i] && blobs[i].bytes; if (!b) return null;
+    const u = Uint8Array.from(b), dv = new DataView(u.buffer); let p = 0; const out = [];
+    const f = () => { const v = dv.getFloat32(p, true); p += 4; return R(v); };
+    while (p < u.length) {
+      const c = u[p++];
+      if (c === 0) out.push("Z");
+      else if (c === 1) { const x = f(), y = f(); out.push("M" + x + " " + y); }
+      else if (c === 2) { const x = f(), y = f(); out.push("L" + x + " " + y); }
+      else if (c === 3) { const a = [f(), f(), f(), f()]; out.push("Q" + a.join(" ")); }
+      else if (c === 4) { const a = [f(), f(), f(), f(), f(), f()]; out.push("C" + a.join(" ")); }
+      else return null;
+    }
+    return out.join(" ");
+  }
+  const geom = list => (list || []).map(g => ({ path: blobPath(g.commandsBlob), windingRule: g.windingRule === "ODD" || g.windingRule === "EVENODD" ? "EVENODD" : "NONZERO" })).filter(g => g.path);
+
+  function handles(t) {
+    if (!t) return null;
+    const a = t.m00, c = t.m01, e = t.m02, b = t.m10, d = t.m11, f = t.m12, det = a * d - b * c || 1;
+    const inv = (x, y) => { const X = x - e, Y = y - f; return { x: (d * X - c * Y) / det, y: (-b * X + a * Y) / det }; };
+    return [inv(0, 0.5), inv(1, 0.5), inv(0, 1)];
+  }
+  const extOf = b => !b ? "" : b[0] === 0x89 && b[1] === 0x50 ? ".png" : b[0] === 0xff && b[1] === 0xd8 ? ".jpg" : b[0] === 0x47 && b[1] === 0x49 ? ".gif" : b[0] === 0x52 && b[8] === 0x57 ? ".webp" : "";
+  const hexBytes = h => Array.from(h || []).map(x => x.toString(16).padStart(2, "0")).join("");
+  const paint = p => {
+    const o = { type: p.type, visible: p.visible, opacity: p.opacity, blendMode: p.blendMode };
+    if (p.type === "SOLID") o.color = p.color;
+    else if (p.type && p.type.startsWith("GRADIENT_")) { o.gradientStops = p.stops || []; o.gradientHandlePositions = handles(p.transform); }
+    else if (p.type === "IMAGE") { const h = hexBytes(p.image && p.image.hash); o.imageRef = h; o._url = "./images/" + h + extOf((dec.images || {})[h]); o.scaleMode = p.imageScaleMode || "FILL"; }
+    return o;
+  };
+  const effect = e => ({ ...e, type: e.type === "FOREGROUND_BLUR" ? "LAYER_BLUR" : e.type });
+
+  function weightOf(n) {
+    const md = n.textData && n.textData.fontMetaData && n.textData.fontMetaData[0];
+    if (md && md.fontWeight) return md.fontWeight;
+    const s = ((n.fontName || {}).style || "").toLowerCase();
+    const W = [["thin", 100], ["extralight", 200], ["ultralight", 200], ["light", 300], ["medium", 500], ["semibold", 600], ["demibold", 600], ["extrabold", 800], ["ultrabold", 800], ["black", 900], ["heavy", 900], ["bold", 700]];
+    for (const [k, w] of W) if (s.replace(/[\s-]/g, "").includes(k)) return w;
+    return 400;
+  }
+
+  function build(n, px, py, id) {
+    const t = n.transform || { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 };
+    const size = n.size || { x: 0, y: 0 };
+    const x = px + t.m02, y = py + t.m12;
+    const auto = n.stackMode && n.stackMode !== "NONE";
+    let type = n.type;
+    if (type === "SYMBOL") type = "COMPONENT";
+    else if (type === "ROUNDED_RECTANGLE") type = "RECTANGLE";
+    else if (type === "FRAME" && n.isStateGroup) type = "COMPONENT_SET";
+    else if (type === "FRAME" && n.resizeToFit && !auto) type = "GROUP";
+    const o = { id, type, name: n.name, visible: n.visible !== false, opacity: n.opacity,
+      absoluteBoundingBox: { x, y, width: size.x, height: size.y } };
+    if (Math.abs(t.m01) > 1e-4 || Math.abs(t.m10) > 1e-4) {
+      o._rotDeg = (Math.atan2(-t.m10, t.m00) * 180) / Math.PI;
+      if (t.m00 * t.m11 - t.m01 * t.m10 < 0) o._flipped = true;
+    } else if (t.m00 < 0 || t.m11 < 0) o._flipped = true;
+    o.fills = (n.fillPaints || []).map(paint);
+    o.strokes = (n.strokePaints || []).map(paint);
+    o.strokeWeight = n.strokeWeight; o.strokeAlign = n.strokeAlign; o.strokeCap = n.strokeCap; o.strokeJoin = n.strokeJoin;
+    if (n.borderStrokeWeightsIndependent) o.individualStrokeWeights = { top: n.borderTopWeight || 0, right: n.borderRightWeight || 0, bottom: n.borderBottomWeight || 0, left: n.borderLeftWeight || 0 };
+    if (n.dashPattern && n.dashPattern.length) o.strokeDashes = n.dashPattern;
+    o.effects = (n.effects || []).map(effect);
+    if (n.rectangleCornerRadiiIndependent) o.rectangleCornerRadii = [n.rectangleTopLeftCornerRadius || 0, n.rectangleTopRightCornerRadius || 0, n.rectangleBottomRightCornerRadius || 0, n.rectangleBottomLeftCornerRadius || 0];
+    else if (n.cornerRadius) o.cornerRadius = n.cornerRadius;
+    if (["FRAME", "COMPONENT", "COMPONENT_SET", "INSTANCE"].includes(type)) o.clipsContent = n.frameMaskDisabled === false;
+    if (type !== "GROUP" && ["FRAME", "COMPONENT", "COMPONENT_SET", "INSTANCE"].includes(type)) {
+      o.layoutMode = auto ? n.stackMode : "NONE";
+      if (auto) {
+        Object.assign(o, { itemSpacing: n.stackSpacing || 0, paddingTop: n.stackVerticalPadding || 0, paddingRight: n.stackPaddingRight ?? n.stackHorizontalPadding ?? 0,
+          paddingBottom: n.stackPaddingBottom ?? n.stackVerticalPadding ?? 0, paddingLeft: n.stackHorizontalPadding || 0,
+          primaryAxisAlignItems: n.stackPrimaryAlignItems === "SPACE_EVENLY" || n.stackPrimaryAlignItems === "SPACE_BETWEEN" ? "SPACE_BETWEEN" : n.stackPrimaryAlignItems || "MIN",
+          counterAxisAlignItems: n.stackCounterAlignItems || "MIN",
+          primaryAxisSizingMode: /^RESIZE_TO_FIT/.test(n.stackPrimarySizing || "") ? "AUTO" : "FIXED",
+          counterAxisSizingMode: /^RESIZE_TO_FIT/.test(n.stackCounterSizing || "") ? "AUTO" : "FIXED",
+          layoutWrap: n.stackWrap === "WRAP" ? "WRAP" : "NO_WRAP", strokesIncludedInLayout: !!n.bordersTakeSpace });
+      }
+    }
+    if (n.stackChildPrimaryGrow) o.layoutGrow = 1;
+    if (n.stackChildAlignSelf === "STRETCH") o.layoutAlign = "STRETCH";
+    if (n.stackPositioning === "ABSOLUTE") o.layoutPositioning = "ABSOLUTE";
+    if (n.arcData) o.arcData = n.arcData;
+    if (n.count) o.pointCount = n.count;
+    if (["VECTOR", "BOOLEAN_OPERATION", "LINE", "STAR", "REGULAR_POLYGON"].includes(type)) { o.fillGeometry = geom(n.fillGeometry); o.strokeGeometry = geom(n.strokeGeometry); }
+    if (type === "TEXT") {
+      const fs = n.fontSize || 12, lh = n.lineHeight, ls = n.letterSpacing, fn = n.fontName || {};
+      o.characters = (n.textData && n.textData.characters) || "";
+      o.textAutoResize = n.textAutoResize || "NONE";
+      const s = { fontFamily: fn.family, fontWeight: weightOf(n), fontSize: fs, italic: /italic/i.test(fn.style || ""),
+        textAlignHorizontal: n.textAlignHorizontal, textAlignVertical: n.textAlignVertical, textCase: n.textCase, textDecoration: n.textDecoration };
+      if (lh) {
+        if (lh.units === "PIXELS") { s.lineHeightUnit = "PIXELS"; s.lineHeightPx = lh.value; }
+        else if (lh.units === "PERCENT") { if (lh.value === 100) s.lineHeightUnit = "INTRINSIC_%"; else { s.lineHeightUnit = "PIXELS"; s.lineHeightPx = (lh.value / 100) * fs; } }
+        else if (lh.units === "RAW") { s.lineHeightUnit = "PIXELS"; s.lineHeightPx = lh.value * fs; }
+      }
+      if (ls && ls.value) s.letterSpacing = ls.units === "PERCENT" ? (ls.value / 100) * fs : ls.value;
+      o.style = s;
+      const ids = n.textData && n.textData.characterStyleIDs;
+      if (ids && ids.some(v => v)) o.characterStyleOverrides = [1];
+    }
+    const prefix = (id.startsWith("I") ? id : "I" + id) + ";";
+    if (type === "INSTANCE") {
+      const sd = n.symbolData || {};
+      const sym = sd.symbolID && findSymbol(sd.symbolID);
+      if (sym) {
+        o.componentId = gs(sym.guid);
+        o.children = synth(sym, x, y, prefix, sd.symbolOverrides || [], n.derivedSymbolData || []);
+      } else o.children = [];
+    } else {
+      o.children = childrenOf(n).map(c => build(c, x, y, gs(c.guid)));
+    }
+    return o;
+  }
+
+  function synth(sym, px, py, prefix, overrides, derived) {
+    return childrenOf(sym).map(c => {
+      const keys = [gs(c.guid)]; if (c.overrideKey) keys.push(gs(c.overrideKey));
+      const mine = [], deeper = [], dMine = [], dDeeper = [];
+      for (const ov of overrides) { const g = (ov.guidPath && ov.guidPath.guids) || []; if (!g.length || !keys.includes(gs(g[0]))) continue; (g.length === 1 ? mine : deeper).push({ ...ov, guidPath: { guids: g.slice(1) } }); }
+      for (const dv of derived) { const g = (dv.guidPath && dv.guidPath.guids) || []; if (!g.length || !keys.includes(gs(g[0]))) continue; (g.length === 1 ? dMine : dDeeper).push({ ...dv, guidPath: { guids: g.slice(1) } }); }
+      const node = { ...c };
+      for (const ov of mine) for (const [k, v] of Object.entries(ov)) {
+        if (k === "guidPath") continue;
+        if (k === "overriddenSymbolID") node.symbolData = { ...(node.symbolData || {}), symbolID: v };
+        else if (k === "textData") node.textData = { ...(c.textData || {}), ...v };
+        else node[k] = v;
+      }
+      for (const dv of dMine) { if (dv.size) node.size = dv.size; if (dv.transform) node.transform = dv.transform; if (dv.fillGeometry) node.fillGeometry = dv.fillGeometry; if (dv.strokeGeometry) node.strokeGeometry = dv.strokeGeometry; }
+      const id = prefix + gs(c.guid);
+      if (node.type === "INSTANCE") {
+        const sd = node.symbolData || {};
+        const inner = { ...node, symbolData: { ...sd, symbolOverrides: [...(sd.symbolOverrides || []), ...deeper] }, derivedSymbolData: [...(node.derivedSymbolData || []), ...dDeeper] };
+        return build(inner, px, py, id);
+      }
+      const built = build({ ...node, guid: c.guid }, px, py, id);
+      // children of a plain node inside a symbol must keep instance-prefixed ids and overrides
+      const t = node.transform || { m02: 0, m12: 0 };
+      built.children = synth(c, px + t.m02, py + t.m12, prefix, deeper, dDeeper);
+      return built;
+    });
+  }
+
+  const doc = nodes.find(n => n.type === "DOCUMENT");
+  if (!doc) throw new Error("No document root found in this .fig file.");
+  const visible = childrenOf(doc).filter(p => p.type === "CANVAS" && !p.internalOnly);
+  const pages = visible.map(p => ({ id: gs(p.guid), type: "CANVAS", name: p.name, children: childrenOf(p).map(c => build(c, 0, 0, gs(c.guid))) }));
+  // Library components live on Figma's hidden internal canvas; bring the ones this file uses along as reusable components
+  const onPage = new Set(), used = new Map();
+  (function mark(list) { for (const n of list) { onPage.add(gs(n.guid)); mark(childrenOf(n)); } })(visible);
+  const want = g => { const s = g && findSymbol(g); if (s && !onPage.has(gs(s.guid)) && !used.has(gs(s.guid))) { used.set(gs(s.guid), s); walk(s); } };
+  function walk(n) {
+    if (n.type === "INSTANCE" && n.symbolData) { want(n.symbolData.symbolID); for (const ov of n.symbolData.symbolOverrides || []) if (ov.overriddenSymbolID) want(ov.overriddenSymbolID); }
+    for (const c of childrenOf(n)) walk(c);
+  }
+  visible.forEach(walk);
+  if (used.size) {
+    let X = 0, Y = 0, rowH = 0;
+    const lib = [];
+    for (const s of used.values()) {
+      const t = s.transform || { m02: 0, m12: 0 }, sz = s.size || { x: 0, y: 0 };
+      if (X > 0 && X + sz.x > 2400) { X = 0; Y += rowH + 80; rowH = 0; }
+      lib.push(build(s, X - t.m02, Y - t.m12, gs(s.guid)));
+      X += sz.x + 80; rowH = Math.max(rowH, sz.y);
+    }
+    pages.push({ id: "library", type: "CANVAS", name: "Library components", children: lib });
+    notes.push("library:" + used.size);
+  }
+  return { rest: { name: "fig", document: { id: gs(doc.guid), type: "DOCUMENT", children: pages }, components: {} }, notes, images: Object.keys(dec.images || {}) };
+}
+const C = (r,g,b,a=1)=>({r,g,b,a});
+const SAMPLE_FILE = {
+  name: "Sample login screen",
+  document: { id: "0:0", type: "DOCUMENT", children: [{ id: "0:1", type: "CANVAS", name: "Page 1", children: [
+    { id: "1:2", type: "COMPONENT", name: "Button", absoluteBoundingBox: { x: 0, y: 0, width: 104, height: 44 },
+      layoutMode: "HORIZONTAL", primaryAxisAlignItems: "CENTER", counterAxisAlignItems: "CENTER", itemSpacing: 8,
+      paddingLeft: 20, paddingRight: 20, paddingTop: 12, paddingBottom: 12, layoutSizingHorizontal: "HUG", layoutSizingVertical: "HUG",
+      cornerRadius: 10, fills: [{ type: "SOLID", color: C(0.16,0.33,0.92), boundVariables: { color: { type: "VARIABLE_ALIAS", id: "VariableID:1:1" } } }], strokes: [], effects: [],
+      children: [{ id: "1:3", type: "TEXT", name: "Label", characters: "Button", absoluteBoundingBox: { x: 20, y: 12, width: 64, height: 20 },
+        textAutoResize: "WIDTH_AND_HEIGHT", style: { fontFamily: "Inter", fontWeight: 600, fontSize: 15, lineHeightPx: 20, lineHeightUnit: "PIXELS", textAlignHorizontal: "CENTER", textAlignVertical: "CENTER" },
+        fills: [{ type: "SOLID", color: C(1,1,1) }] }] },
+    { id: "2:1", type: "FRAME", name: "Login card", absoluteBoundingBox: { x: 200, y: 0, width: 360, height: 292 },
+      layoutMode: "VERTICAL", itemSpacing: 16, paddingLeft: 32, paddingRight: 32, paddingTop: 32, paddingBottom: 32,
+      layoutSizingHorizontal: "FIXED", layoutSizingVertical: "HUG", cornerRadius: 20, clipsContent: true,
+      fills: [{ type: "SOLID", color: C(1,1,1), boundVariables: { color: { type: "VARIABLE_ALIAS", id: "VariableID:1:2" } } }],
+      effects: [{ type: "DROP_SHADOW", visible: true, color: C(0.06,0.09,0.16,0.12), offset: { x: 0, y: 8 }, radius: 24, spread: 0 }],
+      children: [
+        { id: "2:2", type: "TEXT", name: "Title", characters: "Welcome back", absoluteBoundingBox: { x: 232, y: 32, width: 296, height: 32 },
+          layoutSizingHorizontal: "FILL", layoutSizingVertical: "HUG", textAutoResize: "HEIGHT",
+          style: { fontFamily: "Inter", fontWeight: 700, fontSize: 24, lineHeightPx: 32, lineHeightUnit: "PIXELS" }, fills: [{ type: "SOLID", color: C(0.07,0.09,0.13) }] },
+        { id: "2:3", type: "TEXT", name: "Subtitle", characters: "Sign in to continue", absoluteBoundingBox: { x: 232, y: 80, width: 140, height: 20 },
+          layoutSizingHorizontal: "HUG", layoutSizingVertical: "HUG", textAutoResize: "WIDTH_AND_HEIGHT",
+          style: { fontFamily: "Inter", fontWeight: 400, fontSize: 14, lineHeightPx: 20, lineHeightUnit: "PIXELS" }, fills: [{ type: "SOLID", color: C(0.42,0.45,0.5) }] },
+        { id: "2:4", type: "RECTANGLE", name: "Email field", absoluteBoundingBox: { x: 232, y: 116, width: 296, height: 44 },
+          layoutSizingHorizontal: "FILL", layoutSizingVertical: "FIXED", cornerRadius: 10,
+          fills: [{ type: "SOLID", color: C(0.96,0.97,0.98) }], strokes: [{ type: "SOLID", color: C(0.82,0.84,0.87) }], strokeWeight: 1, strokeAlign: "INSIDE" },
+        { id: "2:5", type: "INSTANCE", name: "Button", componentId: "1:2", absoluteBoundingBox: { x: 232, y: 176, width: 296, height: 44 },
+          layoutMode: "HORIZONTAL", primaryAxisAlignItems: "CENTER", counterAxisAlignItems: "CENTER", itemSpacing: 8,
+          paddingLeft: 20, paddingRight: 20, paddingTop: 12, paddingBottom: 12, layoutSizingHorizontal: "FILL", layoutSizingVertical: "HUG",
+          cornerRadius: 10, fills: [{ type: "SOLID", color: C(0.16,0.33,0.92), boundVariables: { color: { type: "VARIABLE_ALIAS", id: "VariableID:1:1" } } }], strokes: [], effects: [],
+          children: [{ id: "I2:5;1:3", type: "TEXT", name: "Label", characters: "Sign in", absoluteBoundingBox: { x: 352, y: 188, width: 56, height: 20 },
+            textAutoResize: "WIDTH_AND_HEIGHT", style: { fontFamily: "Inter", fontWeight: 600, fontSize: 15, lineHeightPx: 20, lineHeightUnit: "PIXELS", textAlignHorizontal: "CENTER", textAlignVertical: "CENTER" },
+            fills: [{ type: "SOLID", color: C(1,1,1) }] }] }
+      ] },
+    { id: "3:1", type: "ELLIPSE", name: "Avatar", absoluteBoundingBox: { x: 600, y: 0, width: 64, height: 64 },
+      fills: [{ type: "GRADIENT_LINEAR", gradientHandlePositions: [{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }],
+        gradientStops: [{ position: 0, color: C(0.98,0.6,0.2) }, { position: 1, color: C(0.9,0.2,0.5) }] }] }
+  ] }] },
+  components: { "1:2": { key: "sample", name: "Button", description: "" } }
+};
+const SAMPLE_VARS = { meta: {
+  variableCollections: { "VariableCollectionId:1:0": { id: "VariableCollectionId:1:0", name: "mode", defaultModeId: "1:0", modes: [{ modeId: "1:0", name: "light" }, { modeId: "1:1", name: "dark" }] } },
+  variables: {
+    "VariableID:1:1": { id: "VariableID:1:1", name: "color/primary", resolvedType: "COLOR", variableCollectionId: "VariableCollectionId:1:0", valuesByMode: { "1:0": C(0.16,0.33,0.92), "1:1": C(0.4,0.55,1) } },
+    "VariableID:1:2": { id: "VariableID:1:2", name: "color/surface", resolvedType: "COLOR", variableCollectionId: "VariableCollectionId:1:0", valuesByMode: { "1:0": C(1,1,1), "1:1": C(0.11,0.13,0.17) } }
+  } } };
+</script>
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const input=$("input"), vars=$("vars"), output=$("output"), err=$("err"), page=$("page");
+  let lastPages = null, figSrc = null;
+  const figcard=$("figcard");
+  function setFig(src){ figSrc=src; figcard.hidden=!src; if(src){ $("figname").textContent=src.name; $("figmeta").textContent="Figma file format v"+src.version+", "+src.pages+" page(s). Decoded locally; nothing was uploaded."; } }
+  $("figclear").addEventListener("click",()=>{ setFig(null); input.value=""; input.focus(); });
+  function showErr(m){ err.textContent=m; err.hidden=!m; }
+  function parse(txt,label){ try{ return JSON.parse(txt); } catch(e){ throw new Error(label+" isn’t valid JSON: "+e.message); } }
+  function refreshPages(names){
+    const key=names.join("\u0000"); if(key===lastPages) return; lastPages=key;
+    page.innerHTML='<option value="all">All pages</option>'+names.map((n,i)=>'<option value="'+i+'"></option>').join("");
+    names.forEach((n,i)=>{ page.options[i+1].textContent=n; });
+  }
+  function run(){
+    showErr("");
+    if(!figSrc && !input.value.trim()){ showErr("Drop a .fig or .json file, paste Figma JSON, or load the sample first."); input.focus(); return; }
+    try{
+      const data=figSrc? figSrc.rest : parse(input.value,"The Figma JSON");
+      const v=vars.value.trim()? parse(vars.value,"The variables JSON") : null;
+      const {doc,report}=convert(data,v,{page:page.value,skipHidden:$("skipHidden").checked,components:$("components").checked,variables:$("variables").checked});
+      refreshPages(report.pages);
+      const json=JSON.stringify(doc,null,2);
+      output.value=json;
+      $("stats").textContent=report.total+" layers, "+(new Blob([json]).size/1024).toFixed(1)+" KB";
+      const c=$("counts"); c.innerHTML="";
+      Object.entries(report.counts).forEach(([k,n])=>{ const li=document.createElement("li"); li.innerHTML="<b></b> "; li.firstChild.textContent=n; li.append(k); c.append(li); });
+      if(!c.children.length) c.innerHTML='<li class="muted">No layers found on the selected pages.</li>';
+      const w=$("warns"); w.innerHTML="";
+      if(report.warnings.length){ const ul=document.createElement("ul"); ul.className="warnings";
+        report.warnings.forEach(([m,n])=>{ const li=document.createElement("li"); li.textContent=m+(n>1?" ("+n+"×)":""); ul.append(li); }); w.append(ul);
+      } else { const p=document.createElement("p"); p.className="clean"; p.textContent="Everything converted without known losses. Still compare a render against Figma."; w.append(p); }
+      if(figSrc && figSrc.notes.includes("variables")){ const ul=w.querySelector("ul")||w.appendChild(Object.assign(document.createElement("ul"),{className:"warnings"})); const li=document.createElement("li"); li.textContent="Variables inside .fig files aren’t read; colors were used as plain values. Use the plugin export to keep variables."; ul.prepend(li); const ok=w.querySelector(".clean"); if(ok) ok.remove(); }
+      const im=$("imgs"); im.innerHTML="";
+      if(figSrc && report.images.length){ const p=document.createElement("p"); p.className="muted"; p.style.cssText="font-size:14px;margin:12px 0 0"; p.textContent="Images are included automatically when you click Download."; im.append(p); report.images=[]; }
+      if(report.images.length){ const p=document.createElement("p"); p.className="muted"; p.style.fontSize="14px"; p.style.margin="12px 0 0";
+        p.textContent="Image files to download into ./images/: "+report.images.join(", "); im.append(p); }
+    }catch(e){ showErr(e.message); }
+  }
+  $("go").addEventListener("click",run);
+  $("sample").addEventListener("click",()=>{ setFig(null); input.value=JSON.stringify(SAMPLE_FILE,null,2); vars.value=JSON.stringify(SAMPLE_VARS,null,2); vars.parentElement.open=true; lastPages=null; run(); });
+  $("open").addEventListener("click",()=>$("file").click());
+  async function loadFile(f){
+    showErr(""); lastPages=null;
+    try{
+      if(/\.fig$/i.test(f.name)){
+        if(typeof fflate==="undefined"||typeof fzstd==="undefined") throw new Error("The .fig decoder libraries didn’t load. Check your connection and reload the page.");
+        $("go").textContent="Reading .fig…";
+        const buf=await f.arrayBuffer();
+        await new Promise(r=>setTimeout(r,20));
+        const dec=figDecode(buf);
+        const conv=figToRest(dec);
+        input.value="";
+        setFig({name:f.name,version:dec.version,pages:conv.rest.document.children.length,rest:conv.rest,notes:conv.notes,images:dec.images});
+      } else {
+        const txt=await f.text();
+        setFig(null); input.value=txt;
+      }
+      run();
+    }catch(e){ showErr(/\.fig$/i.test(f.name)? "Couldn’t read this .fig file: "+e.message+" Try the REST JSON or the plugin export instead." : e.message); }
+    finally{ $("go").textContent="Convert to .pen"; }
+  }
+  $("file").addEventListener("change",e=>{ const f=e.target.files[0]; if(f) loadFile(f); e.target.value=""; });
+  input.addEventListener("input",()=>{ if(figSrc) setFig(null); });
+  const drop=$("drop"); let depth=0;
+  const hasFiles=e=>e.dataTransfer && Array.from(e.dataTransfer.types||[]).includes("Files");
+  window.addEventListener("dragenter",e=>{ if(!hasFiles(e)) return; e.preventDefault(); depth++; drop.classList.add("on"); });
+  window.addEventListener("dragover",e=>{ if(!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect="copy"; });
+  window.addEventListener("dragleave",e=>{ if(!hasFiles(e)) return; depth=Math.max(0,depth-1); if(!depth) drop.classList.remove("on"); });
+  window.addEventListener("drop",e=>{ if(!hasFiles(e)) return; e.preventDefault(); depth=0; drop.classList.remove("on");
+    const f=e.dataTransfer.files[0]; if(!f) return;
+    if(!/\.(fig|json)$/i.test(f.name)) { showErr("Drop a .fig or .json file. "+f.name+" isn’t one of those."); return; }
+    loadFile(f); });
+  page.addEventListener("change",run);
+  ["skipHidden","components","variables"].forEach(id=>$(id).addEventListener("change",()=>{ if(figSrc || input.value.trim()) run(); }));
+  $("download").addEventListener("click",()=>{
+    if(!output.value){ showErr("Convert something first, then download the result."); return; }
+    const base=(figSrc? figSrc.name.replace(/\.fig$/i,"") : "design").replace(/[^\w.-]+/g,"-")||"design";
+    let blob, name;
+    const imgs=figSrc && figSrc.images ? Object.entries(figSrc.images).filter(([k])=>k) : [];
+    if(imgs.length){
+      const files={"design.pen":fflate.strToU8(output.value)};
+      for(const [k,v] of imgs){ const ext=v[0]===0x89?".png":v[0]===0xff?".jpg":v[0]===0x47?".gif":v[0]===0x52?".webp":""; files["images/"+k+ext]=v; }
+      blob=new Blob([fflate.zipSync(files,{level:0})],{type:"application/zip"}); name=base+".zip";
+    } else { blob=new Blob([output.value],{type:"application/json"}); name=base+".pen"; }
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; document.body.append(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  });
+  $("copy").addEventListener("click",async()=>{
+    const b=$("copy"); if(!output.value){ showErr("Convert something first, then copy the result."); return; }
+    let ok=false; try{ await navigator.clipboard.writeText(output.value); ok=true; }catch(e){ output.select(); try{ ok=document.execCommand("copy"); }catch(_){} }
+    b.textContent= ok? "Copied" : "Selected, press Ctrl+C"; setTimeout(()=>b.textContent="Copy .pen JSON",1800);
+  });
+})();
+</script>
+</body>
+</html>
